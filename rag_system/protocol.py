@@ -89,6 +89,7 @@ class Message:
         return f"#{self.sequence:03d} {self.type.value:<8} {arrow:<42} {str(subject)[:70]}"
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the envelope, so a transcript can be exported for audit."""
         return {
             "message_id": self.message_id,
             "trace_id": self.trace_id,

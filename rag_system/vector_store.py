@@ -94,6 +94,7 @@ class RetrievalParams:
     expand_query: bool = True
 
     def describe(self) -> str:
+        """Compact rendering of these parameters, for plans and traces."""
         return (
             f"top_k={self.top_k} pool={self.candidate_pool} "
             f"dense={self.dense_weight:.2f} lexical={self.lexical_weight:.2f} "
@@ -280,6 +281,7 @@ class SentenceTransformerBackend(EmbeddingBackend):
         return self
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:  # pragma: no cover - optional path
+        """Encode texts with the loaded checkpoint, L2-normalised."""
         if self._model is None:
             raise RuntimeError("SentenceTransformerBackend.encode called before fit")
         if not texts:
@@ -357,6 +359,7 @@ class BM25Index:
         return scores
 
     def clear(self) -> None:
+        """Reset the index, keeping the configured k1 and b."""
         self.__init__(k1=self.k1, b=self.b)  # type: ignore[misc]
 
 
@@ -747,10 +750,12 @@ class KnowledgeBase:
         return self._stores[domain]
 
     def document(self, doc_id: str) -> Optional[Document]:
+        """Look up a document by id, superseded ones included."""
         with self._lock:
             return self._by_id.get(doc_id)
 
     def documents(self, domain: Optional[str] = None) -> List[Document]:
+        """Every document, or just those in one domain."""
         with self._lock:
             docs = list(self._by_id.values())
         return [d for d in docs if d.domain == domain] if domain else docs

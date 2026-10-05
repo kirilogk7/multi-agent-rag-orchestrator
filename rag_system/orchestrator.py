@@ -77,6 +77,7 @@ class ExecutionPlan:
         return self.sub_queries[1:]
 
     def describe(self) -> str:
+        """Full rendering of the plan: routing, phases and per-domain budgets."""
         lines = [f"Execution plan (trace {self.trace_id})", self.classification.describe()]
         if self.seeded_context:
             lines.append("seeded ctx : " + ", ".join(

@@ -191,6 +191,7 @@ class AgentContribution:
         )
 
     def describe(self) -> str:
+        """Multi-line summary: what was searched, found, and shared."""
         if self.failed:
             return f"[{self.domain}] FAILED: {self.error}"
         if self.abstained:

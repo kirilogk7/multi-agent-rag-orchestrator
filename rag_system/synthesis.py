@@ -120,6 +120,7 @@ class Claim:
         return tokenize(self.text)
 
     def describe(self) -> str:
+        """One-line summary of this claim and its confidence."""
         return (f"[{self.domain}/{self.document.citation_label}] "
                 f"conf={self.confidence:.3f} {truncate(self.text, 96)}")
 
@@ -286,6 +287,7 @@ class Conflict:
         return self.margin >= 0.08
 
     def describe(self) -> str:
+        """Multi-line rendering of the dispute and how it was resolved."""
         return (
             f"[{self.kind}] {self.subject}\n"
             f"    adopted  : {self.winner.document.citation_label} "
@@ -575,6 +577,7 @@ class Citation:
     char_end: int
 
     def render(self) -> str:
+        """Render as a source-list entry, including the verifiable span."""
         section = f" / {self.section}" if self.section else ""
         return (f"{self.marker} {self.doc_id} v{self.version} -- {self.title}{section} "
                 f"({self.domain}, {self.authority}, {self.effective_date}, "
@@ -708,6 +711,37 @@ class ExtractiveSynthesizer(Synthesizer):
         notes: Sequence[str] = (),
         degraded: bool = False,
     ) -> Answer:
+        """Assemble claims and conflicts into a cited answer.
+
+        Assembly order matters and is not arbitrary:
+
+        1. Claims that lost a conflict are removed from the main body, because
+           presenting overruled guidance as current is the worst possible
+           outcome. They are *not* discarded -- they reappear in the conflict
+           section, quoted and cited.
+        2. Surviving claims are deduplicated. Several documents restate the same
+           rule, and repeating it three times with three citations reads as
+           padding rather than thoroughness.
+        3. Citation markers are assigned over everything that appears anywhere in
+           the output, conflict losers included, so an overruled claim is exactly
+           as traceable as an adopted one.
+        4. Findings are grouped by domain in routing order, so the primary
+           domain's answer leads.
+
+        Args:
+            query: The original question, echoed into the answer for context.
+            claims: Every claim gathered from every agent.
+            conflicts: Already-detected conflicts, with winners decided.
+            domains: Selected domains in routing order; controls section order.
+            notes: Caveats to surface to the reader (agent failures, abstentions,
+                context sharing).
+            degraded: Whether an agent failed, which lowers confidence and is
+                stated explicitly rather than hidden.
+
+        Returns:
+            An ``Answer``. With no claims this is an abstention with confidence
+            ``0.0`` -- a legitimate outcome, not an error.
+        """
         if not claims:
             return Answer(
                 query=query,

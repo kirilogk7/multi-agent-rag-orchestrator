@@ -89,6 +89,7 @@ class QueryRecord:
         return hits / len(set(self.expected_domains))
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the record for export or offline analysis."""
         payload = asdict(self)
         payload["routed_domains"] = list(self.routed_domains)
         payload["expected_domains"] = list(self.expected_domains)
@@ -122,6 +123,7 @@ class MetricsRegistry:
             return list(self._records)
 
     def find(self, trace_id: str) -> Optional[QueryRecord]:
+        """Return the record for one query, or ``None`` if unknown."""
         with self._lock:
             return next((r for r in self._records if r.trace_id == trace_id), None)
 
@@ -135,6 +137,7 @@ class MetricsRegistry:
             return True
 
     def clear(self) -> None:
+        """Drop every recorded query."""
         with self._lock:
             self._records.clear()
 

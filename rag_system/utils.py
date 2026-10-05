@@ -161,6 +161,7 @@ class Document:
         return f"{self.doc_id} v{self.version}"
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict suitable for JSON Lines output."""
         payload = asdict(self)
         payload["tags"] = list(self.tags)
         return payload
@@ -230,6 +231,7 @@ class RetrievedChunk:
         return self.chunk.doc_id
 
     def describe(self) -> str:
+        """One-line summary of this passage and the scores that retrieved it."""
         return (
             f"{self.document.citation_label} [{self.document.domain}] "
             f"rel={self.relevance:.3f} (dense={self.dense_score:.3f}, "

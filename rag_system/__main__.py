@@ -26,6 +26,7 @@ DEMO_QUERIES: Sequence[str] = (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="python -m rag_system",
         description="Query the multi-agent RAG system over the synthetic corpus.",
@@ -45,6 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(argv: Optional[List[str]] = None) -> int:
+    """Answer the requested queries and print the results.
+
+    Args:
+        argv: Argument vector; defaults to ``sys.argv[1:]``.
+
+    Returns:
+        Process exit code: ``0`` on success, ``2`` on an invalid query.
+    """
     args = build_parser().parse_args(argv)
     queries = [" ".join(args.query)] if args.query else []
     if args.demo or not queries:

@@ -174,6 +174,7 @@ class DomainScore:
     routing_weight: float = 1.0
 
     def describe(self) -> str:
+        """One-line rendering of this domain's routing evidence."""
         cues = ", ".join(self.matched_cues[:5]) or "-"
         return (f"{self.domain:<11} {self.score:.3f} "
                 f"(centroid={self.centroid_similarity:.3f}, cues={self.cue_score:.3f} "
@@ -231,6 +232,7 @@ class Classification:
         return float(min(1.0, 0.65 * top + 0.35 * min(1.0, margin * 2.5)))
 
     def describe(self) -> str:
+        """Full multi-line rendering of the classification, for plans and demos."""
         lines = [
             f'query      : "{truncate(self.query, 100)}"',
             f"intent     : {self.intent.value}",
@@ -263,6 +265,7 @@ class SubQuery:
     routing_score: float = 0.0
 
     def describe(self) -> str:
+        """Render this sub-query with its rationale and search budget."""
         return (f"[{self.domain}] {truncate(self.text, 86)}\n"
                 f"      why: {self.rationale}\n"
                 f"      retrieval: {self.params.describe()}")
