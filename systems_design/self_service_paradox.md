@@ -5,6 +5,73 @@ without becoming two platforms.**
 
 ---
 
+## Executive summary
+
+**The paradox as stated is not the real one.** The brief frames simplicity against
+power as if there were one dial the two audiences wanted in different positions. If
+that were true, the honest answer would be "build two products". But business users
+and power users are not asking for different amounts of the same thing — they are
+describing the *same workflows at different levels of abstraction*. The answerable
+question is therefore: can one system support several notations over a single shared
+artifact?
+
+**What actually breaks real platforms is the one-way door.** Almost every low-code
+tool offers an escape hatch to code, and almost all of them make it irreversible —
+Unreal's Blueprints compile to C++ and cannot be recovered; Power Automate and
+Power Automate Desktop share a brand and little else. The moment that door shuts
+behind a workflow, you have two platforms with a trapdoor between them, and every
+symptom in the brief follows from that single mechanism: business users cannot
+maintain anything a power user touched, power users must abandon the tooling to add
+one expression, and the platform team ends up with two roadmaps.
+
+**The design, in five moves:**
+
+1. **One canonical IR.** A workflow is one text document. The canvas and the code
+   editor are both *projections* over it; neither owns state the other cannot see.
+   Surfaces emit typed patches rather than rewritten documents, which is why the
+   canvas cannot corrupt a code author's comments even in principle.
+2. **Declarative orchestration, encapsulated computation.** Arbitrary code cannot be
+   drawn as a flowchart, so this design does not pretend otherwise. Control flow is
+   *always* declarative and therefore always drawable; custom code lives inside
+   typed blocks. An engineer's 200-line function appears on a business user's canvas
+   as a node with typed ports, an owner and a test badge — always representable,
+   just not always expandable. This is what makes bidirectionality achievable
+   instead of a promise to write a decompiler.
+3. **A six-rung ladder, escalated per node.** Template → wizard → canvas →
+   expression → code block → GitOps. A workflow can sit at rung 2 and rung 4 at
+   once. Descent is always available, enforced by invariant tests in CI rather than
+   asserted in documentation.
+4. **Power users supply business users.** "Publish as block" turns one engineer's
+   custom logic into every business user's drag-and-drop node. The two audiences are
+   a supply chain, not a conflict, and the platform's job is to shorten it.
+
+5. **Governance keys on blast radius and declared effects, never on authoring
+   method.** Dragging boxes to move money is still moving money. A workflow that
+   renames files in one person's folder needs no review whether or not it contains
+   code; one that pays invoices needs review whether or not it was built by
+   dragging boxes.
+
+**The measure of success is the descent rate** — business users continuing to edit,
+on the canvas, workflows that contain power users' code. Adoption and satisfaction
+can both look healthy while two platforms quietly diverge; the descent rate cannot.
+If it is zero, the one-way door exists in practice whatever the architecture diagram
+claims.
+
+### Where to find each required area
+
+| Required area | Section |
+|---|---|
+| Architecture design — system, interface connections, progressive disclosure | [§2](#2-architecture-design) |
+| User experience strategy — transitions, interface design, onboarding | [§3](#3-user-experience-strategy) |
+| Technical implementation — components, data models, extension mechanisms | [§4](#4-technical-implementation) |
+| Long-term maintainability — evolution, adding capabilities, governance | [§5](#5-long-term-maintainability) |
+
+Risks, the gaps this design does *not* solve, and a four-phase delivery sequence
+follow in [§6](#6-risks-and-how-they-bite) and [§7](#7-delivery-sequence). §1 sets
+out the reasoning behind the reframing above; a reader short of time can skip to §2.
+
+---
+
 ## Contents
 
 1. [The real problem](#1-the-real-problem)
@@ -392,29 +459,29 @@ triggers:
     kind: webhook
     schema: { $ref: "schemas/invoice.json" }
 
-nodes:
-  - id: n_tax
+nodes:                                   # keyed by id: concurrent inserts merge
+  n_tax:
     block: calculate-tax@2.1             # pinned major version
     inputs:
       amount:       { ref: t1.body.total }
       jurisdiction: { ref: t1.body.billing_country }
 
-  - id: n_threshold
+  n_threshold:
     kind: decision
     cases:
       - when: "{{ t1.body.total > 10000 }}"   # rung 3 expression, inline
         then: n_cfo
       - else: n_director
 
-  - id: n_cfo
+  n_cfo:
     block: approval@1.3
     inputs: { approver: { role: cfo }, sla_hours: 48 }
 
-  - id: n_director
+  n_director:
     block: approval@1.3
     inputs: { approver: { role: director }, sla_hours: 24 }
 
-  - id: n_pay
+  n_pay:
     block: pay-invoice@4.0
     inputs:
       amount: { expr: "{{ t1.body.total + n_tax.out.tax }}" }
@@ -423,14 +490,15 @@ nodes:
     timeout: 30s
 
 edges:
-  - [t1, n_tax]
-  - [n_tax, n_threshold]
-  - [n_cfo, n_pay]
-  - [n_director, n_pay]
+  e1: { from: t1,          to: n_tax }
+  e2: { from: n_tax,       to: n_threshold }
+  e3: { from: n_cfo,       to: n_pay }
+  e4: { from: n_director,  to: n_pay }
 
 ui:                                      # non-semantic; canvas owns this region,
-  n_tax:       { x: 120, y: 240 }        # code editor never rewrites it
-  n_threshold: { x: 120, y: 360 }
+  nodes:                                 # code editor never rewrites it
+    n_tax:       { x: 120, y: 240 }
+    n_threshold: { x: 120, y: 360 }
   notes:
     n_pay: "Finance asked for exponential backoff after the Q3 incident."
 ```
@@ -661,25 +729,48 @@ Four consequences, each of which solves a problem the naive design has:
    two lines. Code review of workflow changes stays feasible.
 3. **Undo, audit log and concurrent editing all fall out of one mechanism.** The
    patch stream is the undo stack, the audit trail, and the CRDT/OT input.
-4. **Merge conflicts are rare and legible.** Because nodes have stable IDs and
-   serialisation is deterministic, two people editing different nodes produce
-   non-overlapping diffs that merge cleanly. Conflicts occur only on genuinely
-   concurrent edits to the same field — which is the correct behaviour.
+4. **Merge conflicts are rare and legible** — but only because nodes and edges are
+   *keyed maps* rather than lists (§4.3). With lists, two people each adding a node
+   both append at the same position and conflict even though their work is
+   unrelated, which would undo most of the benefit. Keyed by stable id, their edits
+   touch disjoint regions of the file and merge. Deterministic serialisation then
+   keeps the surviving diffs minimal. Genuine conflicts are confined to concurrent
+   edits of the same field, which is the correct behaviour.
 
-**Round-trip testing is a CI gate, not a test suite nicety.** The property to
-verify is strong and mechanically checkable:
+**Round-trip testing is a CI gate, not a test suite nicety.** The naive
+formulation is a trap, though, and worth spelling out so nobody builds it:
 
 ```
-for all valid IR documents d, surfaces s, and valid edits e:
-    parse(serialise(apply(render(d, s), e))) == expected(d, e)
-  AND  everything in d outside e's target region is byte-identical
+# WRONG -- requires an oracle you cannot write
+parse(serialise(apply(render(d, s), e))) == expected(d, e)
 ```
 
-Implemented as property-based testing with a generator over the IR grammar. The
-second clause is the one that catches real bugs — it is how you find out that
-saving from the canvas dropped an unknown field written by a newer client, or
-reordered a map, or normalised a quoted string. A projection that fails this does
-not ship.
+`expected(d, e)` is the entire difficulty. Computing the correct result of an
+arbitrary edit means reimplementing the edit semantics in the test, and now you
+have two implementations that can agree with each other and both be wrong. This is
+the standard property-testing oracle problem, and it is why "we have round-trip
+tests" is often worth less than it sounds.
+
+The tractable version asserts **invariants**, each of which needs no oracle:
+
+```
+for all valid IR documents d, surfaces s, valid edits e:
+
+  1. IDENTITY      parse(serialise(d)) == d                    # no edit at all
+  2. LOCALITY      regions of d untouched by e are BYTE-identical after the edit
+  3. REFLECTION    render(result, s) shows e applied            # the edit landed
+  4. IDidempotence apply(e) twice == apply(e) once              # where e is idempotent
+  5. STABILITY     serialise(parse(serialise(d))) == serialise(d)
+  6. CROSS-SURFACE render(d, canvas) and render(d, code) agree on node set,
+                   edges, and every input binding
+```
+
+Invariant 2 is the one that catches real bugs: it is how you discover that saving
+from the canvas dropped an unknown field written by a newer client, reordered a
+map, or normalised a quoted string. Invariant 6 is what stops the two surfaces
+drifting into disagreement about what the document means — the failure that
+produces two platforms. A generator over the IR grammar supplies `d` and `e`; a
+projection that fails any invariant does not ship.
 
 ### 4.3 Data models
 
@@ -699,8 +790,12 @@ parameters:                     # what a template exposes; what a wizard renders
 
 triggers: [ { id, kind: webhook|schedule|event|manual, config } ]
 
+# Nodes and edges are KEYED MAPS, not lists. This is a merge property, not a
+# style preference: two people each adding a node to a YAML *list* both append at
+# the same position and conflict, which would break the clean-merge claim in 4.2.
+# Keyed by stable id, concurrent insertions touch disjoint regions and merge.
 nodes:
-  - id: NodeId                                 # stable, never reused
+  <NodeId>:                                    # stable, never reused
     block: <name>@<major>          # OR kind: decision | loop | parallel | wait
     inputs:
       <port>: { literal: any } | { ref: PortRef } | { expr: string }
@@ -708,11 +803,15 @@ nodes:
     timeout: duration
     on_error: fail | continue | route:<NodeId>
 
-edges: [ [from: NodeId, to: NodeId] ]
+edges:                          # keyed by edge id for the same reason
+  <EdgeId>: { from: PortRef, to: PortRef }
 
 ui:                             # non-semantic. Canvas owns; code editor never writes
-  <NodeId>: { x, y, collapsed }
+  nodes:
+    <NodeId>: { x, y, collapsed }
   notes: { <NodeId>: string }
+  # Annotations are keyed by node id and are garbage-collected when that node is
+  # removed, so deleting a commented node does not leave an orphaned note behind.
 
 x-unknown-preserved: {}         # forward compatibility: never dropped on save
 ```
@@ -731,10 +830,18 @@ ports:
   inputs:  { amount: {type: number, required: true}, jurisdiction: {type: string} }
   outputs: { tax: {type: number}, breakdown: {type: "TaxLine[]"} }
 
-effects:                        # DECLARED, enforced at runtime by the sandbox
-  - pure                        # or: network:<domain-allowlist>
-                                #     reads:<data-class>  writes:<data-class>
-                                #     cost:<estimate>     human-in-the-loop
+# Effects split by how far they can be trusted. Conflating the two would
+# overstate what the platform can guarantee -- see the note below the schema.
+effects:
+  enforced:                     # mechanically verifiable at the sandbox boundary
+    - pure                      #   no syscalls, no sockets, no filesystem
+    - network: [api.vendor.com] #   egress proxy denies anything unlisted
+    - filesystem: none
+  attested:                     # author's assertion; NOT mechanically verifiable
+    - reads: [pii]
+    - writes: [finance]
+    - cost: 0.004
+    - human-in-the-loop: false
 impl:
   kind: visual-subgraph | expression | code | connector
   runtime: node20 | python3.12          # when kind=code
@@ -749,12 +856,42 @@ deprecation: { superseded_by: calculate-tax@3, sunset: 2027-06-30 }
 The `effects` field is the keystone of the governance model. Because it is declared
 on the block and **aggregated statically up the workflow graph**, the policy engine
 can answer "does this workflow read PII and egress to the internet?" *before the
-workflow has ever run* — and the sandbox enforces the declaration at runtime, so a
-block that declares `pure` physically cannot open a socket.
+workflow has ever run*.
 
-This is what lets a business user safely compose an engineer's code: the trust
-question is answered by the platform, not by the business user's judgment about
-code they cannot read.
+**But only half of it is enforceable, and the design must not pretend otherwise.**
+A sandbox can guarantee that a block declaring `pure` cannot open a socket, and an
+egress proxy can guarantee it reaches no host outside its allowlist — those are
+boundary properties, checkable mechanically. `writes: [finance]` is a different
+kind of claim entirely: no sandbox can inspect bytes leaving a block through a
+declared, allowlisted connection and determine whether they constitute a financial
+write. That is a semantic assertion by the author.
+
+So the two classes get different treatment:
+
+| | Guarantee | Consequence of a false declaration |
+|---|---|---|
+| `enforced` | Mechanical, at the sandbox and proxy boundary | The block simply fails -- it cannot do the undeclared thing |
+| `attested` | None. Author's word, reviewed by a human | Caught by review, by audit sampling, or not at all |
+
+Three mitigations, none of which makes an attestation a guarantee:
+
+* **Certification tiers do the real work for attested effects** (§5.3). A block
+  with network egress that claims `writes: none` is exactly what security review
+  exists to examine, and `uncertified` blocks are barred from `business-critical`
+  workflows.
+* **Enforced effects bound the attested ones.** A block with
+  `enforced: [pure]` cannot write anything anywhere, so `writes: none` is implied
+  rather than trusted. Attestation only carries weight where egress is permitted.
+* **Connector-mediated access makes some attestations enforceable.** If finance
+  writes are only reachable through a platform connector rather than raw HTTP,
+  `writes: [finance]` becomes observable at the connector and stops being a claim.
+  Routing sensitive systems behind connectors is how you shrink the attested set
+  over time.
+
+This is still what lets a business user safely compose an engineer's code -- the
+trust question is answered by the platform rather than by their judgment about code
+they cannot read -- but it is answered with a mix of proof and accountability, not
+proof alone.
 
 **Run** — event-sourced for replay and debugging:
 
@@ -1062,6 +1199,45 @@ for deciding whether to build this.
 | **Canvas does not scale to large graphs** | Medium | A 150-node workflow is unreadable however it is drawn | Subgraph blocks as the primary decomposition tool; collapse/expand; search and minimap. Partly mitigated by the flywheel, which rewards extraction |
 | **Power users reject it anyway** | Medium | Engineers are rightly suspicious of low-code | Rung 5 is a first-class citizen: real Git, real CI, real code review, real local testing, a real API. If the CLI feels like a toy, they leave — and this is a product-quality risk, not an architectural one |
 | **Migration debt** | Medium | Thousands of artifacts, few available authors | Platform-owned migrations and codemods; additive-only changes; preserved unknown fields |
+
+### 6.1 What this design does not solve
+
+Four gaps a reviewer should be able to find without being told, so they are stated
+rather than left to be discovered.
+
+**Phase 1 has a chicken-and-egg problem the roadmap creates.** Rungs 4-5 arrive in
+months 6-9, so power users are underserved for half a year. But power users are
+exactly who build the initial block catalog, and business users cannot compose
+blocks that do not exist. Shipping phase 1 with 20 hand-built core blocks and no
+contribution path means the catalog does not grow until phase 3. The mitigation is
+unglamorous: the platform team writes the first 40-50 blocks itself, treating that
+as seeding cost rather than product work, and recruits a handful of power users as
+design partners with direct SDK access ahead of general availability. Both cost
+real headcount, and the plan should say so.
+
+**Template divergence is unaddressed.** Templates are workflows with locked
+parameters, and "customise" unlocks them — which forks the instance. When the
+template author ships a fix, forked instances do not receive it, and there is no
+merge path back. This is the classic fork problem and it has no clean answer here.
+A partial one: keep a `derived_from: <template>@<version>` link, surface "the
+template you started from has updated" with a diff, and let the owner adopt changes
+node by node. That is a real feature with real cost, not a footnote.
+
+**Canvas scalability has a circular answer.** §6 says a 150-node workflow is
+unreadable and that subgraph blocks are the decomposition tool — but decomposing
+requires the author to notice the need and do the work, which is precisely what
+someone who built a 150-node graph did not do. A platform that only rewards
+decomposition after the fact has already lost. Better: warn at a node threshold,
+suggest extraction candidates automatically by finding weakly-connected subgraphs,
+and make "extract these 12 nodes to a block" a one-click operation on that
+suggestion.
+
+**The attested half of the effects model is only as good as review** (§4.3). A block
+with legitimate network egress can carry any `writes:` claim its author chooses,
+and no sandbox will catch a false one. Certification tiers and audit sampling are
+accountability mechanisms, not guarantees. Shrinking the attested set by routing
+sensitive systems behind platform connectors is the structural fix, and it is
+ongoing work rather than a launch property.
 
 **The honest summary of the risk profile:** this design concentrates nearly all of
 its technical risk in one component, the projection layer, and buys a great deal of

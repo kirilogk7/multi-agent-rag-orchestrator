@@ -430,6 +430,10 @@ Five load-bearing decisions:
 5. **Governance keys on blast radius and declared effects, never on authoring
    method.** Dragging boxes to move money is still moving money.
 
+It opens with a **one-page executive summary** giving the whole answer in about two
+minutes, so the depth below is optional supporting material rather than a
+prerequisite, and a table pointing at the section for each required area.
+
 The document covers all four required areas — architecture, UX strategy, technical
 implementation, long-term maintainability — with ASCII diagrams, concrete IR/block/run
 schemas, a worked example of one workflow shown simultaneously as a canvas, as YAML
@@ -438,6 +442,13 @@ delivery sequence. It also argues the uncomfortable sequencing point: build the 
 and the projection discipline in phase 1, *before any user can benefit from them*,
 because shipping a visual builder whose state lives in UI components is exactly how
 platforms end up unable to add a code path later.
+
+§6.1 states four gaps the design does **not** solve: the chicken-and-egg problem the
+roadmap creates (power users arrive in month 6, but they are who builds the initial
+block catalog), template divergence after a fork, the circularity in the canvas
+scalability answer, and the fact that only half the effects model is mechanically
+enforceable — a sandbox can prove a block opened no socket, but nothing can verify
+its claim to have written no financial data.
 
 The success metric proposed is the **descent rate** — business users continuing to
 edit, on the canvas, workflows that contain power users' code. If that is zero, the
