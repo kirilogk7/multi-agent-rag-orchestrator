@@ -421,6 +421,75 @@ def test_every_citation_verifies_against_its_source(
     assert not failures, f"unverifiable citations: {failures}"
 
 
+def test_every_citation_is_referenced_in_the_answer(
+    orchestrator: RAGOrchestrator
+) -> None:
+    """The source list must not carry entries the reader never sees quoted.
+
+    Regression guard: citations were previously minted over every retrieved claim
+    rather than over the selected ones, producing source lists with 15 entries for
+    8 displayed findings.
+    """
+    for query, _expected in ASSIGNMENT_SCENARIOS:
+        answer = orchestrator.answer(query)
+        orphans = [c.marker for c in answer.citations if c.marker not in answer.text]
+        assert not orphans, f"unreferenced citations {orphans} for {query!r}"
+
+
+def test_findings_are_ranked_by_topicality_not_authority(
+    orchestrator: RAGOrchestrator
+) -> None:
+    """Within a domain, findings appear in descending topicality order.
+
+    Regression guard: ranking by blended confidence let a recent high-authority
+    document outrank an on-topic older one, so a question about deployment
+    approvals was answered with API gateway retry guidance.
+    """
+    answer = orchestrator.answer(
+        "What approvals are needed to deploy a microservice that touches personal data?")
+    for domain in answer.domains:
+        scores = [c.topicality for c in answer.claims if c.domain == domain]
+        assert scores == sorted(scores, reverse=True), f"{domain} findings misordered"
+
+
+def test_diagnostic_query_surfaces_procedural_guidance(
+    orchestrator: RAGOrchestrator
+) -> None:
+    """A "how do I" question must surface the procedure, not just the rules.
+
+    Regression guard: salience rewarded only obligation markers, so for the
+    troubleshooting scenario the corpus's own latency triage procedure scored
+    lowest of all candidates and was dropped in favour of a data-store rule.
+    """
+    answer = orchestrator.answer(
+        "How do I troubleshoot API performance issues while following our "
+        "security policies?")
+    cited = {c.doc_id for c in answer.citations}
+    assert "TECH-API-004" in cited, (
+        "the API performance troubleshooting guide was not used for a "
+        f"troubleshooting question; cited instead: {sorted(cited)}")
+
+
+def test_topicality_ignores_authority_and_recency(
+    knowledge_base: KnowledgeBase
+) -> None:
+    """Topicality must depend only on relevance and salience.
+
+    Asserted directly on the data model, because this separation is the whole
+    point: authority and recency belong to conflict adjudication, not to deciding
+    whether a sentence answers the question.
+    """
+    extractor = ClaimExtractor()
+    query = "What is our log retention period?"
+    hits = knowledge_base.search(query, "compliance", RetrievalParams(top_k=3))
+    claims = [c for hit in hits for c in extractor.extract(hit, query)]
+    assert claims
+    for claim in claims:
+        expected = round(0.60 * claim.components["relevance"]
+                         + 0.40 * claim.components["salience"], 4)
+        assert claim.topicality == pytest.approx(expected, abs=1e-4)
+
+
 def test_citation_verification_catches_a_corrupted_span(
     orchestrator: RAGOrchestrator
 ) -> None:

@@ -279,6 +279,43 @@ because conflict resolution here is a governance decision with an auditable basi
 and should not be delegated to a sampled output. Any API failure falls back to
 the extractive path, so enabling it can degrade prose but never lose the answer.
 
+**Selection is by topicality, not by confidence.** Claims carry two scores that
+answer different questions, and conflating them produced two real defects:
+
+```
+topicality = 0.60·relevance + 0.40·salience        ← is this about the question?
+confidence = 0.36·relevance + 0.26·salience
+           + 0.22·authority + 0.16·recency         ← should this be believed?
+```
+
+Ranking *displayed* findings by `confidence` let authority and recency outvote
+topical fit. Asked "what approvals are needed to deploy a microservice", the
+technical agent displayed "Retries use exponential backoff and are capped at three
+attempts" (confidence 0.528) above "a production deployment requires one approving
+reviewer" (0.449) — identical salience, but the retry guidance sits in a recent
+`standard` and the approval rule in an older `runbook`. Authority and recency say
+nothing about whether a sentence answers the question, so they now inform
+confidence and conflict adjudication only.
+
+Selection then applies a per-domain rule: **each contributing domain shows its
+single best finding, plus any others clearing a topicality floor** (absolute 0.40,
+or 0.55 × the domain's best, whichever is higher). The first half guarantees a
+routed domain is represented; the second stops padding. Citations are minted
+*after* selection, which also fixed a source list carrying 15 entries for 8
+displayed findings.
+
+**Salience is intent-aware.** A `+0.26` bonus for obligation markers ("must",
+"prohibited") biased selection toward policy prose and against procedures — the
+wrong way round for a "how do I" question. Asked how to troubleshoot API latency,
+"Begin API latency triage by confirming the symptom in the golden-signal
+dashboard" scored 0.202, the *lowest* of all candidates, because it contains no
+modal verb and no quantity. The bonus now goes to whichever marker class matches
+the query intent (procedural markers for diagnostic/procedural intents, obligation
+markers for requirement/approval), with a reduced bonus for the other since a
+sentence can be both. Salience also blends in query overlap against the document's
+title and section, because a query shares few words with any single sentence while
+"API Performance Troubleshooting Guide" is decisive evidence.
+
 **Citations are verifiable, not merely rendered.** Each claim carries the
 character span of the source document it came from, and `verify_citations`
 re-reads every span and reports mismatches. This guards the failure mode that

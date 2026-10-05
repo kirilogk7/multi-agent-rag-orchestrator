@@ -69,6 +69,23 @@ GENERIC_ANCHORS: frozenset = frozenset({
 #: Words that mark a sentence as stating a rule rather than describing context.
 #: A claim-bearing sentence is what conflict detection and citation need; a
 #: scene-setting sentence is noise in both.
+#: Words marking a sentence as describing a *procedure* rather than a rule.
+#:
+#: These exist because rewarding only obligation language biases claim selection
+#: toward policy prose and against instructions, which is exactly backwards for a
+#: "how do I" question. Asked how to troubleshoot API latency, the definitive
+#: sentence in the corpus -- "Begin API latency triage by confirming the symptom in
+#: the golden-signal dashboard" -- scored lowest of all candidates, because it
+#: contains no "must" and no quantity. Which marker class earns the bonus is
+#: therefore chosen by query intent (see ``ClaimExtractor._salience``).
+PROCEDURAL_MARKERS: frozenset = frozenset({
+    "begin", "start", "first", "next", "then", "check", "verify", "confirm",
+    "inspect", "identify", "decompose", "review", "run", "use", "open", "collect",
+    "measure", "compare", "look", "trace", "triage", "diagnose", "reproduce",
+    "enable", "disable", "restart", "roll", "rollback", "escalate", "follow",
+    "ensure", "set", "configure", "apply", "raise", "lower", "increase",
+})
+
 OBLIGATION_MARKERS: frozenset = frozenset({
     "must", "required", "require", "requires", "shall", "mandatory", "prohibited",
     "forbidden", "may", "cannot", "need", "needs", "should", "obliged", "expected",
@@ -119,6 +136,26 @@ class Claim:
     def tokens(self) -> List[str]:
         return tokenize(self.text)
 
+    @property
+    def topicality(self) -> float:
+        """How much this claim is *about the question*, in ``[0, 1]``.
+
+        Deliberately distinct from ``confidence``, which answers a different
+        question. Topicality blends passage relevance with sentence-level
+        salience only; it ignores authority and recency entirely.
+
+        The separation exists because conflating the two produced a real defect.
+        Asked "what approvals are needed to deploy a microservice", the technical
+        agent displayed "Retries use exponential backoff and are capped at three
+        attempts" -- which scored higher than "a production deployment requires
+        one approving reviewer" purely because the retry guidance lives in a
+        recent *standard* while the approval rule lives in an older *runbook*.
+        Authority and recency say nothing about whether a sentence answers the
+        question asked, so they are excluded here and kept where they belong, in
+        conflict adjudication and answer confidence.
+        """
+        return float(round(0.60 * self.retrieval_relevance + 0.40 * self.salience, 4))
+
     def describe(self) -> str:
         """One-line summary of this claim and its confidence."""
         return (f"[{self.domain}/{self.document.citation_label}] "
@@ -168,6 +205,7 @@ class ClaimExtractor:
         retrieved: RetrievedChunk,
         query: str,
         *,
+        intent: str = "",
         now: Optional[date] = None,
     ) -> List[Claim]:
         """Extract scored claims from one retrieved passage.
@@ -179,10 +217,15 @@ class ClaimExtractor:
         """
         document = retrieved.document
         query_tokens = set(tokenize(query))
+        # The document's own title and section are strong topical evidence and are
+        # free to use: a sentence from "API Performance Troubleshooting Guide"
+        # deserves topical credit on an API-performance question even when that
+        # sentence happens to share few words with the query itself.
+        title_tokens = set(tokenize(f"{document.title} {document.section}"))
         claims: List[Claim] = []
 
         for sentence in split_sentences(retrieved.chunk.text):
-            salience = self._salience(sentence, query_tokens)
+            salience = self._salience(sentence, query_tokens, title_tokens, intent)
             if salience < self.min_salience:
                 continue
 
@@ -222,26 +265,67 @@ class ClaimExtractor:
         claims.sort(key=lambda c: -c.confidence)
         return claims[: self.max_claims_per_passage]
 
-    def _salience(self, sentence: str, query_tokens: Iterable[str]) -> float:
-        """How much this sentence looks like an answer to the query.
+    #: Intents whose answers are procedures, so procedural language is the signal.
+    PROCEDURAL_INTENTS: frozenset = frozenset({"diagnostic", "procedural"})
 
-        Three signals: lexical overlap with the query, whether the sentence
-        states an obligation, and whether it contains a concrete quantity.
-        The last two matter because a sentence with a number or a "must" is
-        almost always the operative one in policy prose.
+    def _salience(
+        self,
+        sentence: str,
+        query_tokens: Iterable[str],
+        title_tokens: Iterable[str] = (),
+        intent: str = "",
+    ) -> float:
+        """How much this sentence looks like an answer to *this* query.
+
+        Four signals:
+
+        * **Lexical overlap** with the query, blended with overlap between the
+          query and the parent document's title. The title term matters because a
+          query shares few words with any single sentence, so sentence overlap
+          alone barely separates candidates -- while "API Performance
+          Troubleshooting Guide" is decisive evidence on an API-performance
+          question.
+        * **Marker class matched to intent.** A requirement question is answered
+          by obligations ("must", "prohibited"); a diagnostic or procedural
+          question is answered by instructions ("begin", "check", "compare").
+          Rewarding only obligations made the system rank a data-store rule above
+          the actual latency triage procedure when asked how to troubleshoot
+          latency. The matching class earns the full bonus and the other a
+          reduced one, since a sentence can legitimately be both.
+        * **Presence of a concrete quantity**, which in policy prose usually
+          marks the operative sentence.
+
+        Args:
+            sentence: The candidate sentence.
+            query_tokens: Stemmed content tokens of the query.
+            title_tokens: Stemmed tokens of the document title and section.
+            intent: Query intent value, selecting which marker class is rewarded.
         """
         tokens = set(tokenize(sentence))
         if not tokens:
             return 0.0
         query_tokens = set(query_tokens)
-        overlap = (len(tokens & query_tokens) / len(query_tokens)) if query_tokens else 0.0
+        if not query_tokens:
+            return 0.0
+
+        sentence_overlap = len(tokens & query_tokens) / len(query_tokens)
+        title_overlap = (len(set(title_tokens) & query_tokens) / len(query_tokens)
+                         if title_tokens else 0.0)
+        overlap = 0.72 * sentence_overlap + 0.28 * title_overlap
+
         raw = set(tokenize(sentence, stem=False))
         has_obligation = bool(raw & OBLIGATION_MARKERS)
+        has_procedure = bool(raw & PROCEDURAL_MARKERS)
         has_quantity = bool(extract_measurements(sentence))
 
+        wants_procedure = intent in self.PROCEDURAL_INTENTS
+        primary = has_procedure if wants_procedure else has_obligation
+        secondary = has_obligation if wants_procedure else has_procedure
+
         score = 0.55 * min(1.0, overlap * 2.2)
-        score += 0.28 if has_obligation else 0.0
-        score += 0.17 if has_quantity else 0.0
+        score += 0.26 if primary else 0.0
+        score += 0.10 if secondary else 0.0
+        score += 0.15 if has_quantity else 0.0
         return float(round(min(1.0, score), 4))
 
 
@@ -696,10 +780,18 @@ class ExtractiveSynthesizer(Synthesizer):
 
     name = "extractive"
 
-    def __init__(self, *, max_claims_per_domain: int = 4,
-                 dedupe_threshold: float = 0.72) -> None:
+    def __init__(
+        self,
+        *,
+        max_claims_per_domain: int = 4,
+        dedupe_threshold: float = 0.72,
+        topicality_floor: float = 0.40,
+        relative_floor: float = 0.55,
+    ) -> None:
         self.max_claims_per_domain = max_claims_per_domain
         self.dedupe_threshold = dedupe_threshold
+        self.topicality_floor = topicality_floor
+        self.relative_floor = relative_floor
 
     def synthesize(
         self,
@@ -762,11 +854,17 @@ class ExtractiveSynthesizer(Synthesizer):
             )
 
         overruled = {c.loser.claim_id for c in conflicts}
-        kept = self._dedupe([c for c in claims if c.claim_id not in overruled])
+        deduped = self._dedupe([c for c in claims if c.claim_id not in overruled])
 
-        # Citations are assigned over every claim that appears anywhere in the
-        # output, conflict losers included -- an overruled claim is quoted in the
-        # conflict section and must be just as traceable as an adopted one.
+        # Select what the answer will actually say before minting any citations.
+        # Doing it in the other order produces a source list padded with
+        # documents the reader never sees quoted.
+        required = {c.winner.claim_id for c in conflicts}
+        kept = self._select(deduped, domains, required=required)
+
+        # Citations cover everything that appears anywhere in the output,
+        # conflict losers included -- an overruled claim is quoted in the conflict
+        # section and must be just as traceable as an adopted one.
         cited = kept + [c.loser for c in conflicts if c.loser.claim_id in overruled]
         citations, marker_of = self._build_citations(cited)
 
@@ -806,6 +904,64 @@ class ExtractiveSynthesizer(Synthesizer):
                 continue
             kept.append(claim)
         return kept
+
+    def _select(
+        self,
+        claims: Sequence[Claim],
+        domains: Sequence[str],
+        *,
+        required: Optional[set] = None,
+    ) -> List[Claim]:
+        """Choose which claims the answer states, ranked by topicality.
+
+        The rule: **each contributing domain shows its single best finding, plus
+        any others that clear the topicality bar.** Both halves matter.
+
+        Showing the best regardless of score guarantees a domain that was routed
+        to is actually represented, so a weak-but-real contribution is visible
+        rather than silently dropped. Gating the rest on topicality stops the
+        padding that the previous confidence-ordered version produced: asked
+        about deployment approvals, the technical agent filled its four slots
+        with API gateway retry and timeout guidance, because those passages came
+        from a recent high-authority document and nothing was checking whether
+        they addressed the question.
+
+        A domain whose corpus genuinely has little to say about a question should
+        say little. Fewer, on-topic findings beat four slots filled.
+
+        Args:
+            claims: Deduplicated, non-overruled claims.
+            domains: Selected domains, in routing order.
+            required: Claim ids that must be included whatever they score --
+                conflict winners, since the conflict section refers to them.
+
+        Returns:
+            Selected claims, ordered by domain then by descending topicality.
+        """
+        required = required or set()
+        selected: List[Claim] = []
+
+        for domain in domains:
+            in_domain = sorted(
+                (c for c in claims if c.domain == domain),
+                key=lambda c: -c.topicality,
+            )
+            if not in_domain:
+                continue
+            best = in_domain[0]
+            floor = max(self.topicality_floor, self.relative_floor * best.topicality)
+            chosen = [
+                c for c in in_domain
+                if c is best or c.claim_id in required or c.topicality >= floor
+            ]
+            selected.extend(chosen[: self.max_claims_per_domain])
+
+        # Any required claim from a domain that was not routed to (possible when
+        # a conflict spans an unexpected domain) is appended rather than lost.
+        chosen_ids = {c.claim_id for c in selected}
+        selected.extend(c for c in claims
+                        if c.claim_id in required and c.claim_id not in chosen_ids)
+        return selected
 
     def _build_citations(self, claims: Sequence[Claim]) -> Tuple[List[Citation], Dict[str, str]]:
         """Assign markers in order of first appearance, one per claim span."""
@@ -852,7 +1008,8 @@ class ExtractiveSynthesizer(Synthesizer):
                          marker_of: Dict[str, str]) -> List[str]:
         sections: List[str] = []
         for domain in domains:
-            subset = [c for c in claims if c.domain == domain][: self.max_claims_per_domain]
+            subset = sorted((c for c in claims if c.domain == domain),
+                            key=lambda c: -c.topicality)
             if not subset:
                 continue
             lines = [f"{domain.capitalize()} ({len(subset)} finding(s))"]

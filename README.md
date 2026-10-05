@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 54-test suite runs in under two.
+seconds, and the 58-test suite in a few more.
 
 ---
 
@@ -35,7 +35,7 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 54 tests, ~2s
+python -m pytest tests/ -q                 # 58 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
@@ -223,6 +223,18 @@ worse. They are documented at their implementation sites and in the notebook:
   name nothing retrievable. "…and what compliance checks are needed" searched
   alone returned generic audit-evidence passages and missed the governing policy;
   anchoring it back to the query's subject fixes that.
+- **Topicality is separated from confidence, and salience is intent-aware.**
+  Ranking displayed findings by blended confidence let authority and recency
+  outvote whether a sentence answered the question: asked about deployment
+  approvals, the technical agent filled its slots with API gateway retry and
+  timeout guidance, because that lived in a recent `standard` while the approval
+  rule lived in an older `runbook`. And rewarding only obligation words
+  ("must", "prohibited") biased selection toward policy prose over procedures —
+  asked how to troubleshoot API latency, the corpus's actual triage procedure
+  scored *lowest* of all candidates. Findings are now ranked by topicality
+  (relevance + salience only), salience rewards the marker class matching the
+  query's intent, and each domain shows its best finding plus whatever clears
+  the bar — so a domain with little to say says little instead of padding.
 
 ---
 
@@ -269,7 +281,7 @@ capability visibly changes behaviour:
 │   └── __main__.py               # (+) CLI entry point
 ├── data/synthetic/               # 49 documents across 3 domains + an update fixture
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 54 tests
+├── tests/test_scenarios.py       # 58 tests
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
@@ -305,7 +317,7 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q          # 54 tests
+python -m pytest tests/ -q          # 58 tests
 python -m doctest rag_system/protocol.py rag_system/utils.py
 ```
 

@@ -292,7 +292,9 @@ class DomainAgent:
                 contribution.passages = list(passages)
                 claims: List[Claim] = []
                 for passage in passages:
-                    claims.extend(self.extractor.extract(passage, issued))
+                    claims.extend(
+                        self.extractor.extract(passage, issued, intent=sub_query.intent)
+                    )
                 contribution.claims = self._apply_trust(claims)
                 contribution.abstained = not contribution.claims
             except Exception as exc:  # noqa: BLE001 - isolation boundary

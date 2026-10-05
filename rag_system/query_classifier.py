@@ -261,6 +261,7 @@ class SubQuery:
     text: str
     rationale: str
     params: RetrievalParams
+    intent: str = ""
     source_clause: str = ""
     routing_score: float = 0.0
 
@@ -695,6 +696,7 @@ class QueryClassifier:
                     text=text,
                     rationale=rationale,
                     params=params,
+                    intent=classification.intent.value,
                     source_clause=clause,
                     routing_score=domain_score.score,
                 )
