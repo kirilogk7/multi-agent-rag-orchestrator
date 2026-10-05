@@ -358,6 +358,36 @@ def test_polarity_conflict_detected(knowledge_base: KnowledgeBase) -> None:
     assert polarity[0].winner.domain == "compliance"
 
 
+def test_polarity_conflict_is_reachable_end_to_end(
+    orchestrator: RAGOrchestrator
+) -> None:
+    """The prohibition must surface through the full pipeline, not just the resolver.
+
+    ``test_polarity_conflict_detected`` feeds the resolver directly with both
+    domains forced, which proves the detector works but *not* that a user can
+    reach it. This asserts the whole path: a permission question must route to
+    compliance, retrieve the prohibition, and report the contradiction.
+
+    Routing is the fragile link. "Can I enable verbose request tracing in
+    production to debug latency?" routes to technical alone -- three strong
+    technical cues (latency, debug, tracing) against the weak "can i" signal --
+    and so is answered with the runbook that explains how, never surfacing the
+    policy that forbids it. Explicit permission phrasing clears that bar. See the
+    routing limitation noted in README and data/synthetic/README.md.
+    """
+    answer = orchestrator.answer(
+        "Am I allowed to enable verbose request tracing in production?")
+
+    assert "compliance" in answer.domains, (
+        f"permission question did not reach compliance; routed to {answer.domains}")
+    polarity = [c for c in answer.conflicts if c.kind == "polarity"]
+    assert polarity, (
+        "the verbose-tracing prohibition did not surface as a conflict end to end; "
+        f"cited: {sorted({c.doc_id for c in answer.citations})}")
+    assert polarity[0].winner.doc_id == "COMP-SEC-006"
+    assert "prohibited" in answer.text or "overruled" in answer.text
+
+
 def test_supersession_conflict_is_decisive(knowledge_base: KnowledgeBase) -> None:
     """A declared version bump resolves without relying on heuristic margins."""
     claims = _claims_for(knowledge_base,

@@ -389,7 +389,31 @@ Document metadata is not decoration: `authority`, `effective_date`, `version`,
 | Concurrency | two-phase, threads | flat async fan-out | Context sharing requires an ordering. At scale, phase 2 becomes async I/O against a remote store. |
 | Classifier | lexicon + centroids | fine-tuned classifier | No labelled routing data exists here, and the hybrid is debuggable per-signal. |
 
-**Known limitations.** Sentence splitting is regex-based and will merge
+**Known limitations.** Two are worth naming before the generic ones, because they
+are capability gaps rather than quality ceilings.
+
+*Weak permission phrasing can misroute.* "Can I enable verbose request tracing in
+production to debug latency?" selects technical only: three strong technical cues
+(`latency`, `debug`, `tracing`) outweigh the lone `can i` signal, and because the
+selection threshold is `top_score × ratio`, an unusually strong primary domain
+raises the bar for secondary ones. The result is the failure conflict resolution
+exists to prevent — the user learns how to enable verbose tracing and never learns
+the security policy forbids it. Explicit permission phrasing routes correctly.
+Left unfixed deliberately: raising the cue weight over-routes genuine technical
+questions, and capping the relative threshold was measured to fix this single query
+at exactly one value (0.42) while improving nothing across twelve independent
+harder queries and breaking a different case at 0.40 — a magic number, not an
+improvement. Learning per-cue weights from logged feedback is the real fix.
+
+*The supersession detector is inert on the default path.* Superseded documents are
+excluded from retrieval so answers quote current policy, which means the detector
+receives nothing in normal use. It is reachable with `include_superseded=True` and
+through the live knowledge-update flow, both of which are tested. Delivering what
+it was built for — "you may be thinking of the old rule, here is what changed" —
+requires a second narrow retrieval pass used for conflict detection only, never for
+quotation. Not implemented.
+
+Beyond those: sentence splitting is regex-based and will merge
 sentences in messier prose. The cue lexicons are hand-authored and would need
 maintenance as domains evolve. Conflict detection is O(n²) in claims, which is
 fine at this scale but would need blocking by subject at corpus scale. Numeric

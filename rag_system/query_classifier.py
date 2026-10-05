@@ -126,6 +126,16 @@ DOMAIN_CUES: Dict[str, Dict[str, float]] = {
         "least privilege": 2.2, "access": 1.3, "confidential": 2.0,
         "restricted": 1.8, "anonymisation": 2.2, "data protection": 2.5,
         "change control": 2.2, "exception": 1.5, "risk": 1.3, "legal": 1.8,
+        # Permission-seeking phrasing. A question of the form "can I do X" is a
+        # question about what policy allows, even when every other word in it is
+        # technical. Without these cues "Can I enable verbose request tracing in
+        # production?" routed to technical alone and was answered with the runbook
+        # that says how to do it -- never surfacing the security policy that
+        # forbids it. That is precisely the failure conflict resolution exists to
+        # prevent, so the routing has to reach compliance in the first place.
+        # Weighted modestly: these are hints, not domain ownership.
+        "am i allowed": 2.2, "allowed to": 1.6, "may i": 1.6,
+        "is it ok": 1.6, "permitted": 1.8, "can i": 1.1,
     },
 }
 

@@ -298,6 +298,7 @@ capability visibly changes behaviour:
 │   ├── monitoring.py             # (+) metrics registry
 │   └── __main__.py               # (+) CLI entry point
 ├── data/synthetic/               # 49 documents across 3 domains + an update fixture
+│   └── README.md                 # provenance, record schema, planted conflicts
 ├── notebooks/demo.ipynb
 ├── tests/test_scenarios.py       # 58 tests
 ├── docs/architecture.md
@@ -315,10 +316,14 @@ module.
 
 ### The synthetic corpus
 
-49 documents — 17 technical, 16 business, 16 compliance — written as realistic
-internal documentation. Metadata is load-bearing: `authority` (`policy` >
-`standard` > `runbook` > `wiki`), `effective_date`, `version`, `status` and
-`supersedes` are all consumed by conflict resolution.
+49 documents — 17 technical, 16 business, 16 compliance — written from scratch for
+this exercise. No real company data, and no company names at all. Provenance, the
+full record schema and the planted conflicts are documented in
+[`data/synthetic/README.md`](data/synthetic/README.md).
+
+Metadata is load-bearing: `authority` (`policy` > `standard` > `runbook` >
+`wiki`), `effective_date`, `version`, `status` and `supersedes` are all consumed by
+conflict resolution.
 
 Four contradictions are planted deliberately, so conflict resolution has something
 real to adjudicate rather than being demonstrated on a toy example:
@@ -364,6 +369,24 @@ Stated plainly, with what production would change set out in
   would learn per-cue weights from logged feedback.
 - **Thresholds tuned against a handful of queries**, not a held-out set. With real
   traffic they should be fitted and monitored for drift.
+- **Weak permission phrasing can misroute.** "Can I enable verbose request tracing
+  in production to debug latency?" routes to technical alone — three strong
+  technical cues outweigh the single weak `can i` signal, and the selection
+  threshold is relative to the leading domain's score, so a strong primary raises
+  the bar for secondary domains. The user is then told how to do it and never told
+  policy forbids it. Explicit phrasing ("Am I allowed to…", "Is X permitted?")
+  routes correctly and is pinned by a test. Deliberately left unfixed: the
+  candidate fixes were raising the cue weight (over-routes genuine technical
+  questions) or capping the relative threshold, which on measurement fixed this one
+  query at exactly one value and improved nothing on an independent harder set.
+  Learning per-cue weights from logged feedback is the real fix.
+- **The supersession detector is inert on the default path.** It is implemented and
+  tested, but superseded documents are excluded from retrieval so that answers
+  quote current policy — which means nothing feeds the detector in normal use. It
+  fires with `include_superseded=True` or through the live knowledge-update flow.
+  Surfacing "you may be thinking of the old rule" in ordinary answers needs a
+  second narrow retrieval pass for conflict detection only; that is not
+  implemented.
 - **Conflict detection is O(n²) in claims** — fine here, needs blocking by subject
   at corpus scale.
 - **Numeric extraction** covers the unit families in this corpus, not arbitrary ones.
