@@ -26,6 +26,17 @@ default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
 seconds, and the 58-test suite in a few more.
 
+### Demo
+
+<video src="docs/media/demo.mp4" controls muted playsinline poster="docs/media/demo_poster.jpg" width="100%"></video>
+
+33-second walkthrough of one `--explain` call against a fresh clone: multi-label
+routing with confidence scores, query decomposition, the synthesized answer,
+the detected contradiction and how it was resolved, citations, the inter-agent
+message transcript, and the citation audit — all produced by a single real
+invocation, annotated after the fact for clarity. (If the player above doesn't
+render in your viewer, open [`docs/media/demo.mp4`](docs/media/demo.mp4) directly.)
+
 ---
 
 ## Quickstart
