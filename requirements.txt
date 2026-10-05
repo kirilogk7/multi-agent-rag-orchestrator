@@ -1,0 +1,12 @@
+# Runtime dependencies.
+#
+# numpy is the only hard requirement. That is deliberate: the default embedding
+# backend is TF-IDF projected through a truncated SVD, computed locally, so the
+# system needs no model download, no API key and no network access. The demo
+# notebook therefore runs end to end on a clean checkout in seconds.
+numpy>=1.24
+
+# Development and demo tooling.
+pytest>=7.4
+jupyter>=1.0
+matplotlib>=3.7

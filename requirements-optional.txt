@@ -1,0 +1,11 @@
+# Optional extras. Nothing here is needed to run the system, the notebook or the
+# tests -- each one swaps a local component for a heavier, more capable one.
+
+# Pretrained sentence embeddings via rag_system.vector_store.SentenceTransformerBackend.
+# Pulls in torch (several hundred MB) and downloads a checkpoint on first use.
+sentence-transformers>=2.2
+
+# Generative answer synthesis via rag_system.synthesis.ClaudeSynthesizer.
+# Also requires ANTHROPIC_API_KEY; without it the system silently keeps using the
+# deterministic extractive synthesizer.
+anthropic>=1.0

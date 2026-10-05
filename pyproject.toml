@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-system"
+version = "1.0.0"
+description = "Multi-agent RAG orchestration over mock technical, business and compliance domains"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "jupyter>=1.0", "matplotlib>=3.7"]
+embeddings = ["sentence-transformers>=2.2"]
+claude = ["anthropic>=1.0"]
+
+[tool.setuptools]
+packages = ["rag_system"]
+
+[tool.setuptools.package-data]
+rag_system = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:rag_system.*"]
