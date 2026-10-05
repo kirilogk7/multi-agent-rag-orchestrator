@@ -4,6 +4,17 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+This repository contains both deliverables:
+
+| | Deliverable | Where |
+|---|---|---|
+| **1** | Multi-agent RAG orchestration system | [`rag_system/`](rag_system/) · [`notebooks/demo.ipynb`](notebooks/demo.ipynb) · [`docs/architecture.md`](docs/architecture.md) |
+| **2** | Systems design: The Self-Service Paradox | [`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md) |
+
+---
+
+## Task 1 — Multi-agent RAG orchestration
+
 A simulated multi-agent RAG system over three mock knowledge domains
 (**technical**, **business**, **compliance**). A query classifier routes each
 question to the domains that own parts of the answer, domain agents retrieve
@@ -260,6 +271,8 @@ capability visibly changes behaviour:
 ├── notebooks/demo.ipynb
 ├── tests/test_scenarios.py       # 54 tests
 ├── docs/architecture.md
+├── systems_design/
+│   └── self_service_paradox.md   # task 2
 └── .github/workflows/ci.yml      # pytest on 3.10–3.12, CLI smoke test, notebook execution
 ```
 
@@ -327,6 +340,55 @@ Stated plainly, with what production would change set out in
 - **Not implemented:** query caching, authentication and document-level access
   control, multi-turn conversational context, a held-out evaluation harness with
   regression gates, streaming partial answers.
+
+---
+
+## Task 2 — Systems design: The Self-Service Paradox
+
+[`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md)
+— a design for one automation platform serving business users and power users
+without becoming two platforms.
+
+**The argument in short.** The brief frames this as simplicity versus power, as if
+there were one dial the two audiences wanted in different positions. If that were
+true it would be unsolvable. It isn't: both audiences are describing the same
+workflows at different levels of abstraction, so the real question is whether one
+system can support several notations over a single shared artifact.
+
+What actually breaks existing platforms is the **one-way door** — "convert to code"
+with no way back (Unreal's Blueprints, Power Automate's two products sharing a
+brand). The moment that door shuts behind a workflow, you have two platforms with a
+trapdoor between them, and every symptom in the brief follows.
+
+Five load-bearing decisions:
+
+1. **One canonical IR; every surface is a projection over it.** The canvas and the
+   code editor are both *views*. Neither owns state the other cannot see.
+2. **Declarative orchestration, encapsulated computation.** Control flow is always
+   declarative and therefore always drawable; arbitrary code lives inside typed
+   blocks and so stays *representable* even where it isn't expandable. This is the
+   structural move that makes bidirectionality achievable rather than a promise to
+   write a decompiler.
+3. **Escalation is local and reversible** — per node, not per workflow, enforced by
+   a property-based round-trip test in CI rather than asserted in documentation.
+4. **Power users supply business users.** "Publish as block" turns one engineer's
+   custom logic into every business user's drag-and-drop node. The two audiences
+   are a supply chain, not a conflict.
+5. **Governance keys on blast radius and declared effects, never on authoring
+   method.** Dragging boxes to move money is still moving money.
+
+The document covers all four required areas — architecture, UX strategy, technical
+implementation, long-term maintainability — with ASCII diagrams, concrete IR/block/run
+schemas, a worked example of one workflow shown simultaneously as a canvas, as YAML
+and as a code block, a build-versus-buy inventory, a risk table, and a four-phase
+delivery sequence. It also argues the uncomfortable sequencing point: build the IR
+and the projection discipline in phase 1, *before any user can benefit from them*,
+because shipping a visual builder whose state lives in UI components is exactly how
+platforms end up unable to add a code path later.
+
+The success metric proposed is the **descent rate** — business users continuing to
+edit, on the canvas, workflows that contain power users' code. If that is zero, the
+one-way door exists in practice whatever the architecture diagram claims.
 
 ---
 
