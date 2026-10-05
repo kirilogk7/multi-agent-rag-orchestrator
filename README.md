@@ -45,6 +45,24 @@ jupyter lab notebooks/demo.ipynb           # the full walkthrough
 the citation audit. It is the fastest way to see that the coordination is real
 rather than decorative.
 
+**You do not need to run the notebook.** It is committed with executed outputs, so
+it renders in full on GitHub, charts included — and CI executes it end to end on
+every push, so that it runs is verified by the build rather than asserted here.
+
+To execute it anyway without a browser:
+
+```bash
+jupyter nbconvert --to notebook --execute notebooks/demo.ipynb --output /tmp/check.ipynb
+```
+
+If you are in a Docker container or on a remote host, `jupyter lab` needs two extra
+flags (it refuses to start as root, and binds to localhost by default):
+
+```bash
+jupyter lab notebooks/demo.ipynb --allow-root --ip=0.0.0.0 --no-browser
+# then from your own machine:  ssh -L 8888:localhost:8888 <user>@<host>
+```
+
 ```python
 from rag_system import build_default_orchestrator
 
