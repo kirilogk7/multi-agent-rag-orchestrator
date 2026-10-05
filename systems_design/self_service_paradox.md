@@ -111,15 +111,14 @@ Nearly every low-code platform offers an escape hatch to code. Almost all of the
 make it a **one-way door**:
 
 ```
-   ┌─────────────────┐    "Convert to code"    ┌─────────────────┐
-   │  Visual editor  │ ──────────────────────▶ │   Code editor   │
-   │                 │                          │                 │
-   │  drag & drop    │      ✗  no way back  ✗   │  full control   │
-   └─────────────────┘                          └─────────────────┘
-          │                                              │
-          ▼                                              ▼
-   business users                                 power users
-   stranded here                                  stranded here
+   +-----------------+   "Convert to code"    +-----------------+
+   |  Visual editor  |----------------------->|   Code editor   |
+   |                 |                        |                 |
+   |   drag & drop   |   X  no way back  X    |  full control   |
+   +-----------------+                        +-----------------+
+            v                                          v
+     business users                               power users
+      stranded here                              stranded here
 ```
 
 Unreal Engine's Blueprints compile to C++ and cannot be recovered. Power Automate
@@ -194,57 +193,58 @@ Everything below follows from five commitments:
 ### 2.1 System overview
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  SURFACES                      (all equal citizens; none is "the real one")   │
-│                                                                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ │
-│  │ Template │ │  Wizard  │ │  Canvas  │ │Expression│ │   Code   │ │  CLI   │ │
-│  │ gallery  │ │  /forms  │ │  editor  │ │   bar    │ │  editor  │ │ SDK API│ │
-│  │  rung 0  │ │  rung 1  │ │  rung 2  │ │  rung 3  │ │  rung 4  │ │ rung 5 │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └───┬────┘ │
-└───────┼────────────┼────────────┼────────────┼────────────┼───────────┼──────┘
-        │            │            │            │            │           │
-        └────────────┴────────────┴─────┬──────┴────────────┴───────────┘
-                                        │  every surface reads and writes
-                                        │  the SAME document, losslessly
-┌───────────────────────────────────────▼──────────────────────────────────────┐
-│  PROJECTION LAYER            ◀── the critical component; see §2.2, §4.2       │
-│  • render: IR ─▶ view model (canvas graph / form schema / formatted text)     │
-│  • apply : view edit ─▶ typed IR patch (never a re-serialisation of the whole)│
-│  • preserve: layout, comments, formatting, unknown fields (round-trip safety) │
-└───────────────────────────────────────┬──────────────────────────────────────┘
-                                        │
-┌───────────────────────────────────────▼──────────────────────────────────────┐
-│  CANONICAL WORKFLOW IR            ◀── the single source of truth              │
-│  typed DAG · stable node IDs · deterministic serialisation · text-diffable    │
-└───┬───────────────────────┬───────────────────────┬──────────────────────────┘
-    │                       │                       │
-┌───▼─────────────┐ ┌───────▼────────────┐ ┌────────▼─────────────────────────┐
-│ VALIDATION &    │ │ BLOCK REGISTRY     │ │ POLICY ENGINE                    │
-│ COMPILE         │ │ • catalog + search │ │ • policy-as-code (OPA-style)      │
-│ • port type-    │ │ • semver versions  │ │ • evaluated STATICALLY from       │
-│   check         │ │ • ownership        │ │   declared effects, pre-run        │
-│ • effect        │ │ • certification    │ │ • blast-radius tiering            │
-│   aggregation   │ │ • usage stats      │ │ • approval requirements           │
-│ • cost estimate │ └────────────────────┘ └──────────────────────────────────┘
-└───┬─────────────┘
-    │  immutable, validated workflow version
-┌───▼──────────────────────────────────────────────────────────────────────────┐
-│  EXECUTION PLANE                                                             │
-│  Trigger router ─▶ Planner ─▶ Durable scheduler ─▶ Step workers              │
-│                                      │              ├─ declarative evaluator  │
-│                                      │              ├─ expression sandbox     │
-│                                      │              ├─ code sandbox (isolate) │
-│                                      │              └─ connector egress proxy │
-│                                   state store (event-sourced run log)         │
-└───┬──────────────────────────────────────────────────────────────────────────┘
-    │
-┌───▼──────────────────────────────────────────────────────────────────────────┐
-│  OBSERVABILITY                                                               │
-│  per-run trace · per-step input/output inspection · replay · cost attribution │
-│  ONE run view for every rung — a business user and an engineer debug the same │
-│  artifact with the same tool                                                 │
-└──────────────────────────────────────────────────────────────────────────────┘
++--------------------------------------------------------------------------------------------------+
+| SURFACES                                           (all equal citizens -- none is "the real one")|
+|                                                                                                  |
+|  +----------+ +--------+ +--------+ +------------+ +--------+ +-----------+                      |
+|  | Template | | Wizard | | Canvas | | Expression | |  Code  | |   CLI /   |                      |
+|  | gallery  | | /forms | | editor | |    bar     | | editor | | SDK / API |                      |
+|  |  rung 0  | | rung 1 | | rung 2 | |   rung 3   | | rung 4 | |  rung 5   |                      |
+|  +----------+ +--------+ +--------+ +------------+ +--------+ +-----------+                      |
++--------------------------------------------------------------------------------------------------+
+
+         ------------------------------+-------------------------------
+                                       | every surface reads and writes
+                                       | the SAME document, losslessly
++--------------------------------------------------------------------------------------------------+
+| PROJECTION LAYER                                          <- the critical component; see 2.2, 4.2|
+|  - render : IR -> view model (canvas graph / form schema / formatted text)                       |
+|  - apply  : view edit -> typed IR patch (never a re-serialisation of the whole)                  |
+|  - preserve: layout, comments, formatting, unknown fields (round-trip safety)                    |
++--------------------------------------------------------------------------------------------------+
+                                       v
++--------------------------------------------------------------------------------------------------+
+| CANONICAL WORKFLOW IR                                               <- the single source of truth|
+|  typed DAG . stable node IDs . deterministic serialisation . text-diffable                       |
++--------------------------------------------------------------------------------------------------+
+         |--------------------------------|--------------------------------|
+         v                                v                                v
+ +------------------------------+ +------------------------------+ +------------------------------+
+ | VALIDATION & COMPILE         | | BLOCK REGISTRY               | | POLICY ENGINE                |
+ |- port type-check             | |- catalog + search            | |- policy-as-code (OPA-style)  |
+ |- effect aggregation          | |- semver versions             | |- static eval, pre-run,       |
+ |- cost estimate               | |- ownership                   | |  from declared effects       |
+ |                              | |- certification               | |- blast-radius tiering        |
+ |                              | |- usage stats                 | |- approval requirements       |
+ +------------------------------+ +------------------------------+ +------------------------------+
+                 | immutable, validated workflow version
+                 v
++--------------------------------------------------------------------------------------------------+
+| EXECUTION PLANE                                                                                  |
+|  Trigger router -> Planner -> Durable scheduler -> Step workers                                  |
+|                                         |- declarative evaluator                                 |
+|                                         |- expression sandbox                                    |
+|                                         |- code sandbox (isolate)                                |
+|                                         |- connector egress proxy                                |
+|  state store: event-sourced run log                                                              |
++--------------------------------------------------------------------------------------------------+
+                 v
++--------------------------------------------------------------------------------------------------+
+| OBSERVABILITY                                                                                    |
+|  per-run trace . per-step input/output inspection . replay . cost attribution                    |
+|  ONE run view for every rung -- a business user and an engineer debug the                        |
+|  same artifact with the same tool                                                                |
++--------------------------------------------------------------------------------------------------+
 ```
 
 The shape to notice: **the surfaces are a wide, shallow layer, and everything below
@@ -286,34 +286,34 @@ approximation that corrupts people's work.
 So this design does not promise that. It draws a line:
 
 ```
- ┌──────────────────────────────────────────────────────────────────────────┐
- │  ORCHESTRATION  —  always declarative, therefore always renderable        │
- │                                                                          │
- │  control flow · data flow · branching · looping over collections ·        │
- │  error handling · retries · timeouts · parallelism · scheduling ·         │
- │  approvals · waits                                                       │
- │                                                                          │
- │  Expressed ONLY in the IR. There is no code path that can express         │
- │  orchestration — the SDK (rung 5) emits IR too. One notation for          │
- │  structure means the canvas can always draw the structure.                │
- └──────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     │  nodes reference blocks
-                                     ▼
- ┌──────────────────────────────────────────────────────────────────────────┐
- │  COMPUTATION  —  arbitrary, encapsulated behind a typed interface         │
- │                                                                          │
- │  ┌────────────────────────────────────────────────────────────────────┐  │
- │  │  Block: calculate-tax @2.1                                         │  │
- │  │  in  : { amount: number, jurisdiction: string }   ◀── typed ports  │  │
- │  │  out : { tax: number, breakdown: TaxLine[] }                       │  │
- │  │  effects: [ pure ]                               ◀── declared      │  │
- │  │  ┌──────────────────────────────────────────────────────────────┐  │  │
- │  │  │  impl: typescript   ← opaque to the canvas, and that is fine  │  │  │
- │  │  │  export default function(input) { /* 200 lines */ }           │  │  │
- │  │  └──────────────────────────────────────────────────────────────┘  │  │
- │  └────────────────────────────────────────────────────────────────────┘  │
- └──────────────────────────────────────────────────────────────────────────┘
++--------------------------------------------------------------------------------+
+| ORCHESTRATION -- always declarative, therefore always renderable               |
+|                                                                                |
+| control flow . data flow . branching . looping over collections .              |
+| error handling . retries . timeouts . parallelism . scheduling .               |
+| approvals . waits                                                              |
+|                                                                                |
+| Expressed ONLY in the IR. There is no code path that can express               |
+| orchestration -- the SDK (rung 5) emits IR too. One notation for               |
+| structure means the canvas can always draw the structure.                      |
++--------------------------------------------------------------------------------+
+                                         | nodes reference blocks
+                                         v
++--------------------------------------------------------------------------------+
+| COMPUTATION -- arbitrary, encapsulated behind a typed interface                |
+|                                                                                |
+| +----------------------------------------------------------------------------+ |
+| | Block: calculate-tax @2.1                                                  | |
+| | in  : { amount: number, jurisdiction: string }   <- typed ports            | |
+| | out : { tax: number, breakdown: TaxLine[] }                                | |
+| | effects: [ pure ]                                <- declared               | |
+| | +------------------------------------------------------------------------+ | |
+| | | impl: typescript   <- opaque to the canvas, and that is fine           | | |
+| | | export default function(input) { /* 200 lines */ }                     | | |
+| | +------------------------------------------------------------------------+ | |
+| |                                                                            | |
+| +----------------------------------------------------------------------------+ |
++--------------------------------------------------------------------------------+
 ```
 
 A power user's 200-line tax function appears on a business user's canvas as a node
@@ -336,34 +336,30 @@ Six rungs. Every rung is **reversible**, **composable with every other rung in t
 same workflow**, and **applied per node rather than per workflow**.
 
 ```
-                     capability ───────────────────────────────▶
+                     capability -------------------------------------------->
 
- rung 5  GitOps / SDK / API        │ workflow-as-code in your own repo,
-         ░░░░░░░░░░░░░░░░░░░░░░░░ │ CI, code review, the full platform API
-            ▲                      │
-            │ descend: `platform pull` opens the same workflow on canvas
-            ▼
- rung 4  Code block                │ TypeScript/Python in a sandbox, typed
-         ░░░░░░░░░░░░░░░░░░░░      │ ports, own tests, publishable as a block
-            ▲                      │
-            │ descend: delete the node; the rest of the workflow is untouched
-            ▼
- rung 3  Expression                │ `{{ order.total * 1.2 }}` in any field,
-         ░░░░░░░░░░░░░░░           │ autocomplete from the upstream schema
-            ▲                      │
-            │ descend: replace with a literal value
-            ▼
- rung 2  Canvas composition        │ drag blocks, draw edges, branch, loop
-         ░░░░░░░░░░░                │
-            ▲                      │
-            │ descend: no-op; canvas is the home view
-            ▼
- rung 1  Configure a template      │ guided form, validated inputs
-         ░░░░░░                     │
-            ▲                      │ "customise" reveals the canvas beneath
-            ▼                      │ — the template was always a workflow
- rung 0  Run a template            │ zero authoring
-         ░░                         │
+ rung 5  GitOps / SDK / API         | workflow-as-code in your own repo,
+          ########################  | CI, code review, the full platform API
+            ^                       | descend: `platform pull` opens the same workflow on canvas
+            v                       |
+ rung 4  Code block                 | TypeScript/Python in a sandbox, typed
+          ####################      | ports, own tests, publishable as a block
+            ^                       | descend: delete the node; the rest of the workflow is untouched
+            v                       |
+ rung 3  Expression                 | "{{ order.total * 1.2 }}" in any field,
+          #############             | autocomplete from the upstream schema
+            ^                       | descend: replace with a literal value
+            v                       |
+ rung 2  Canvas composition         | drag blocks, draw edges, branch, loop
+          ###########
+            ^                       | descend: no-op; canvas is the home view
+            v                       |
+ rung 1  Configure a template       | guided form, validated inputs
+          ######
+            ^                       | "customise" reveals the canvas beneath -- the template was always a workflow
+            v                       |
+ rung 0  Run a template             | zero authoring
+          ##
 ```
 
 Three properties distinguish this from the usual "beginner/advanced mode" toggle:
@@ -416,39 +412,36 @@ engineer later extends.
 **What the business user sees (rung 2, canvas):**
 
 ```
-    ┌──────────────────┐
-    │ ⚡ Invoice        │  trigger: webhook
-    │   received       │
-    └────────┬─────────┘
-             │ invoice
-             ▼
-    ┌──────────────────┐
-    │ 🧮 Calculate tax  │  ← block: calculate-tax@2.1
-    │                  │    ⟨code⟩  owner: @tax-eng  ✓ 14 tests
-    └────────┬─────────┘    [pure]            ◀── effects badge
-             │ { tax, breakdown }
-             ▼
-    ┌──────────────────┐
-    │ ◆ Over €10,000?  │  ← decision
-    └───┬──────────┬───┘
-   yes  │          │  no
-        ▼          ▼
- ┌─────────────┐ ┌─────────────┐
- │ 👤 CFO       │ │ 👤 Director  │   ← approval blocks
- │   approval  │ │   approval  │
- └──────┬──────┘ └──────┬──────┘
-        └───────┬────────┘
-                ▼
-       ┌──────────────────┐
-       │ 💳 Schedule       │  ← block: pay-invoice@4.0
-       │   payment        │    [network, writes:finance]  ⚠ tier: business-critical
-       └──────────────────┘
+                    +------------------+  trigger: webhook
+                    | Invoice received |
+                    +------------------+
+                              | invoice
+                              v
+                    +------------------+  <- block: calculate-tax@2.1
+                    |  Calculate tax   |     <code>  owner: @tax-eng  [ok] 14 tests
+                    +------------------+     [pure]                   <- effects badge
+                              | { tax, breakdown }
+                              v
+                    +-------------------+  <- decision
+                    | Over EUR 10,000 ? |
+                    +-------------------+
+                  yes |---------------------| no
+                      v                     v
+            +------------------+  +-------------------+  <- approval blocks
+            |   CFO approval   |  | Director approval |
+            +------------------+  +-------------------+
+                      |                     |
+                      -----------|-----------
+                                 v
+                       +------------------+  <- block: pay-invoice@4.0
+                       | Schedule payment |     [network, writes:finance]
+                       +------------------+     tier: business-critical   <- blast-radius warning
 ```
 
 **What the power user sees (rung 5, the same document in Git):**
 
 ```yaml
-schema: workflow/v1                      # explicit version → migratable
+schema: workflow/v1                      # explicit version -> migratable
 id: wf_invoice_approval
 name: Invoice approval
 owner: team:finance-ops
@@ -506,13 +499,13 @@ ui:                                      # non-semantic; canvas owns this region
 **What the engineer escalating one node sees (rung 4):**
 
 ```typescript
-// block: calculate-tax@2.2   — opened from the canvas, canvas stays visible
+// block: calculate-tax@2.2   -- opened from the canvas, canvas stays visible
 import { defineBlock } from "@platform/sdk";
 
 export default defineBlock({
   inputs:  { amount: "number", jurisdiction: "string" },
   outputs: { tax: "number", breakdown: "TaxLine[]" },
-  effects: ["pure"],                      // declared → policy engine can verify
+  effects: ["pure"],                      // declared -> policy engine can verify
   async run({ amount, jurisdiction }) {
     const rules = await loadRules(jurisdiction);
     return applyRules(amount, rules);     // 200 lines elsewhere
@@ -546,15 +539,15 @@ get explicit mechanics rather than being left to a modal dialog.
 **Descent is always available, and this is enforced, not hoped for.**
 
 ```
-    escalate ─────────────────────────────▶
- ┌─────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
- │ Template│ ◀──▶ │  Canvas  │ ◀──▶ │Expression│ ◀──▶ │   Code   │
- └─────────┘      └──────────┘      └──────────┘      └──────────┘
-    ◀───────────────────────────── descend
+escalate ------------------------------------------------->
++----------+      +--------+      +------------+      +------+
+| Template |<---->| Canvas |<---->| Expression |<---->| Code |
++----------+      +--------+      +------------+      +------+
+      <----------------------------------- descend
 
  Enforcement: a CI gate generates random valid IR, renders it through every
  projection, applies a random edit, re-parses, and asserts the result is the
- intended document and nothing else changed (§4.2). A projection that cannot
+ intended document and nothing else changed (4.2). A projection that cannot
  round-trip does not ship.
 ```
 
@@ -573,30 +566,30 @@ Two rules about transitions that are easy to get wrong:
 how much it reveals.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Invoice approval            ● business-critical   [Test] [Diff] [Publish]    │
-├──────────────┬──────────────────────────────────────┬───────────────────────┤
-│ CATALOG      │            CANVAS                    │  INSPECTOR            │
-│              │                                      │  (selected: n_pay)    │
-│ 🔍 search    │   ┌──────────┐                        │                       │
-│              │   │ Invoice  │                        │  Amount               │
-│ Suggested    │   └────┬─────┘                        │  ┌─────────────────┐  │
-│  🧮 Tax      │        ▼                              │  │ fx {{ total +   │  │
-│  👤 Approval │   ┌──────────┐                        │  │    n_tax.tax }} │  │
-│  💳 Payment  │   │ Calc tax │ ⟨code⟩ ✓               │  └─────────────────┘  │
-│              │   └────┬─────┘                        │   ▲ rung 3, inline    │
-│ My team      │        ▼                              │                       │
-│  📊 ...      │   ┌──────────┐                        │  Vendor               │
-│              │   │ Over 10k?│                        │  [ invoice.vendor ▾]  │
-│ ⌘K  commands │   └──────────┘                        │                       │
-│              │                                      │  ▸ Retry & timeout     │
-│              │                                      │  ▸ Error handling      │
-│              │                                      │   ▲ collapsed by       │
-│              │                                      │     default            │
-├──────────────┴──────────────────────────────────────┴───────────────────────┤
-│ ⚠ This workflow moves money. Publishing requires finance approval.           │
-│   Effects: network · writes:finance · reads:pii     Est. cost: €0.004/run     │
-└─────────────────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------------------------------+
+| Invoice approval            * business-critical   [Test] [Diff] [Publish]                |
++----------------+------------------------------------------+------------------------------+
+| CATALOG        |  CANVAS                                  | INSPECTOR                    |
+|                |                                          | (selected: n_pay)            |
+| [search]       |    +---------+                           |                              |
+|                |    | Invoice |                           | Amount                       |
+| Suggested      |    +---------+                           | +--------------------------+ |
+|  Tax           |         v                                | | fx {{ total +            | |
+|  Approval      |    +----------+ <code> [ok]              | |     n_tax.tax }}         | |
+|  Payment       |    | Calc tax |                          | +--------------------------+ |
+|                |    +----------+                          |  ^ rung 3, inline            |
+| My team        |          v                               |                              |
+|  ...           |    +-----------+                         | Vendor                       |
+|                |    | Over 10k? |                         | [ invoice.vendor v ]         |
+| Cmd+K commands |    +-----------+                         |                              |
+|                |                                          | > Retry & timeout            |
+|                |                                          | > Error handling             |
+|                |                                          |  ^ collapsed by default      |
+|                |                                          |                              |
++------------------------------------------------------------------------------------------+
+| [!] This workflow moves money. Publishing requires finance approval.                     |
+|   Effects: network, writes:finance, reads:pii     Est. cost: EUR 0.004/run               |
++------------------------------------------------------------------------------------------+
 ```
 
 Specific decisions and their reasons:
@@ -621,32 +614,33 @@ build two products inside one binary and prevent anyone from ever growing. What
 Three doors, converging deliberately on the same artifact:
 
 ```
-  "I have a task"            "I'll build it"            "I write code"
-        │                          │                          │
-        ▼                          ▼                          ▼
- ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
- │ Template gallery│      │  Blank canvas   │      │ platform init   │
- │                 │      │                 │      │                 │
- │ run in <5 min   │      │ guided first    │      │ scaffold, local │
- │                 │      │ node, sample    │      │ test, push      │
- │                 │      │ data preloaded  │      │                 │
- └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
-          │                        │                        │
-          │   first successful run │                        │
-          └────────────────────────┼────────────────────────┘
-                                   ▼
-                        ┌─────────────────────┐
-                        │  the same workflow  │
-                        │  the same canvas    │
-                        │  the same trace view│
-                        └─────────────────────┘
-                                   │
-                    ┌──────────────┴───────────────┐
-                    ▼                              ▼
-          growth happens by USE            growth happens by NEED
-          (fx hints, "others also           (hit a limit → the platform
-           used…", template internals        names the next rung and
-           visible on customise)             scaffolds it)
+    "I have a task"            "I'll build it"           "I write code"
+            v                         v                         v
+  +------------------+    +-----------------------+    +-----------------+
+  | Template gallery |    |     Blank canvas      |    |  platform init  |
+  |  run in < 5 min  |    |  guided first node,   |    | scaffold, local |
+  |                  |    | sample data preloaded |    |   test, push    |
+  +------------------+    +-----------------------+    +-----------------+
+            |                         |                         |
+            |  first successful run   |                         |
+            -----------------------------------------------------
+                                      v
+                           +---------------------+
+                           |                     |
+                           |  the same workflow  |
+                           |   the same canvas   |
+                           | the same trace view |
+                           +---------------------+
+                                      |
+                                      |
+                    |-----------------------------------|
+                    v                                   v
++----------------------------------+        +-----------------------------+
+|      growth happens by USE       |        |   growth happens by NEED    |
+| fx hints, "others also used...", |        | hit a limit -> the platform |
+|    template internals visible    |        |   names the next rung and   |
+|           on customise           |        |        scaffolds it         |
++----------------------------------+        +-----------------------------+
 ```
 
 The guiding metric is **time to first successful run**, targeted under ten minutes
@@ -703,8 +697,8 @@ This is where the design either works or quietly fails, so it deserves specifics
 Each surface implements two functions:
 
 ```
-render : (IR, viewContext) ─▶ ViewModel
-apply  : (ViewEdit)        ─▶ Patch[]          // typed ops, never a whole document
+render : (IR, viewContext) -> ViewModel
+apply  : (ViewEdit)        -> Patch[]          // typed ops, never a whole document
 ```
 
 Patches are the only way state changes:
@@ -781,7 +775,7 @@ schema: workflow/v1
 id: wf_<slug>
 name: string
 owner: team:<slug> | user:<id>
-tier: personal | team | business-critical      # → governance requirements
+tier: personal | team | business-critical      # -> governance requirements
 version: 7                                     # immutable; publishing increments
 state: draft | published | deprecated
 
@@ -942,30 +936,28 @@ badly.
 ### 4.5 Execution model
 
 ```
- trigger ──▶ ┌──────────────┐   validated,
-             │ Trigger      │   immutable
-             │ router       │   workflow version
-             └──────┬───────┘
-                    ▼
-             ┌──────────────┐  topological plan, parallelism discovered from the
-             │ Planner      │  DAG — a business user gets concurrency without
-             └──────┬───────┘  knowing the word
-                    ▼
-             ┌──────────────┐  durable: survives worker loss, process restart and
-             │ Durable      │  deploys; owns retries, backoff, timers, waits
-             │ scheduler    │  (human approvals are just long waits)
-             └──────┬───────┘
-          ┌─────────┼─────────┬──────────────┐
-          ▼         ▼         ▼              ▼
-    ┌──────────┐┌────────┐┌─────────┐┌──────────────┐
-    │declarative││expr    ││  code   ││  connector   │
-    │ evaluator ││sandbox ││ sandbox ││  via egress  │
-    │           ││        ││(isolate)││    proxy     │
-    └──────────┘└────────┘└─────────┘└──────────────┘
-          │         │         │              │
-          └─────────┴────┬────┴──────────────┘
-                         ▼
-                 event-sourced run log ──▶ trace view, replay, cost attribution
+trigger -> +----------------+  validated, immutable workflow version
+           | Trigger router |
+           +----------------+
+                    v
+           +---------+  topological plan; parallelism discovered from the DAG --
+           | Planner |  a business user gets concurrency without knowing the word
+           +---------+
+                v
+           +-------------------+  durable: survives worker loss, process restart and deploys;
+           | Durable scheduler |  owns retries, backoff, timers, waits (human approvals are
+           +-------------------+  just long waits)
+                     |
+              |----------------------|-----------------|-------------------|
+              v                      v                 v                   v
+  +-----------------------+  +--------------+  +--------------+  +------------------+
+  | declarative evaluator |  | expr sandbox |  | code sandbox |  |    connector     |
+  |                       |  |              |  |  (isolate)   |  | via egress proxy |
+  +-----------------------+  +--------------+  +--------------+  +------------------+
+              |                      |                 |                   |
+              ------------------------------|-------------------------------
+                                            v
+                      event-sourced run log  -> trace view, replay, cost attribution
 ```
 
 Design points worth stating:
@@ -1050,22 +1042,26 @@ than merely survivable. The two audiences are not competing for one dial — the
 a **supply chain**, and the platform's central job is to shorten it.
 
 ```
-       ┌────────────────────────────────────────────────────────────────┐
-       │                                                                │
-       ▼                                                                │
- ┌──────────────┐  hits a limit    ┌──────────────┐  "publish as block" │
- │ Business user│ ───────────────▶ │  Power user  │ ──────────────┐     │
- │ builds on    │  asks for help   │  writes code │               │     │
- │ canvas       │                  │  or a subgraph│              ▼     │
- └──────────────┘                  └──────────────┘      ┌───────────────┐
-       ▲                                                 │ Block registry│
-       │                                                 │  typed ports  │
-       │           appears as ONE drag-and-drop node     │  effects      │
-       └─────────────────────────────────────────────────│  owner, tests │
-                   with a form, in the catalog           └───────────────┘
+  +------------------+    hits a limit    +---------------------------+
+  |  Business user   |------------------->|        Power user         |---- "publish as block"
+  | builds on canvas |   asks for help    | writes code or a subgraph |   |
+  +------------------+                    +---------------------------+   |
+            ^                                                             |
+            |                                                             |
+            |                                                             |
+            |                                                     +-------v--------+
+            |                                                     | Block registry |
+            |                                                     |  typed ports   |
+            |                                                     |    effects     |
+            |                                                     |  owner, tests  |
+            |                                                     +----------------+
+            |                                                              |
+            |  appears as ONE drag-and-drop node,                          |
+            |---------------------------------------------------------------
+               with a form, in the catalog
 
- Each loop: the catalog gains a capability, the next business user needs no help,
- and the power user's work is leveraged instead of consumed.
+Each loop: the catalog gains a capability, the next business user
+needs no help, and the power user's work is leveraged, not consumed.
 ```
 
 Contrast with what happens without this mechanism: a power user helps a colleague by
@@ -1255,32 +1251,35 @@ the thing to prototype first and the thing to kill the project over.
 Four phases. The sequencing argument matters more than the dates.
 
 ```
- Phase 1 ── 0–3 months ── "the spine"
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ IR + schema + validator · deterministic serialiser · durable scheduler    │
- │ canvas (rungs 0–2) · ~20 core blocks · one run/trace view                 │
- │ round-trip property tests in CI from day one                              │
- │                                                                          │
- │ ◀── Ship visual-only. But the IR is already text-serialisable, already    │
- │     has stable IDs, already preserves unknown fields, already has a       │
- │     ui: region. No user can see any of that yet. It is still the most     │
- │     important work in the project.                                        │
- └──────────────────────────────────────────────────────────────────────────┘
- Phase 2 ── 3–6 months ── "depth"
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ expressions (rung 3) with live preview · block SDK · registry             │
- │ policy engine + tiering · observability: step I/O inspection, replay      │
- └──────────────────────────────────────────────────────────────────────────┘
- Phase 3 ── 6–9 months ── "the escape hatch, in both directions"
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ code blocks (rung 4) + sandbox + egress proxy · promote-subgraph-to-block │
- │ ◀── the flywheel starts turning here; descent rate becomes measurable      │
- └──────────────────────────────────────────────────────────────────────────┘
- Phase 4 ── 9–12 months ── "the ecosystem"
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ CLI / SDK / GitOps (rung 5) · marketplace · certification · migrations    │
- │ domain champions onboarded · deprecation tooling                          │
- └──────────────────────────────────────────────────────────────────────────┘
+ Phase 1 -- 0-3 months -- "the spine"
++------------------------------------------------------------------------------+
+| IR + schema + validator . deterministic serialiser . durable scheduler       |
+| canvas (rungs 0-2) . ~20 core blocks . one run/trace view                    |
+| round-trip property tests in CI from day one                                 |
+|                                                                              |
+| <- Ship visual-only. But the IR is already text-serialisable, already        |
+|    has stable IDs, already preserves unknown fields, already has a           |
+|    ui: region. No user can see any of that yet. It is still the most         |
+|    important work in the project.                                            |
++------------------------------------------------------------------------------+
+
+ Phase 2 -- 3-6 months -- "depth"
++------------------------------------------------------------------------------+
+| expressions (rung 3) with live preview . block SDK . registry                |
+| policy engine + tiering . observability: step I/O inspection, replay         |
++------------------------------------------------------------------------------+
+
+ Phase 3 -- 6-9 months -- "the escape hatch, in both directions"
++------------------------------------------------------------------------------+
+| code blocks (rung 4) + sandbox + egress proxy . promote-subgraph-to-block    |
+| <- the flywheel starts turning here; descent rate becomes measurable         |
++------------------------------------------------------------------------------+
+
+ Phase 4 -- 9-12 months -- "the ecosystem"
++------------------------------------------------------------------------------+
+| CLI / SDK / GitOps (rung 5) . marketplace . certification . migrations       |
+| domain champions onboarded . deprecation tooling                             |
++------------------------------------------------------------------------------+
 ```
 
 **The sequencing insight, which is the main practical claim of this section:** build

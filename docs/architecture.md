@@ -17,39 +17,53 @@ vector-store namespace:
 | `compliance` | change control, data protection, security, audit, residency | 16 | 34 |
 
 ```
-                                  user query
-                                       │
-        ┌──────────────────────────────▼──────────────────────────────┐
-        │                      RAGOrchestrator                        │
-        │   plan → phase 1 → phase 2 → resolve → synthesise → record  │
-        └──┬────────────┬─────────────────────────────┬───────────┬───┘
-           │            │                             │           │
-           ▼            ▼                             ▼           ▼
-  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌──────────┐
-  │ QueryClassifier│  │ MessageBus       │  │ Conflict     │  │ Metrics  │
-  │  • routing     │  │  • typed msgs    │  │ Resolver     │  │ Registry │
-  │  • intent      │  │  • transcript    │  │  • numeric   │  │          │
-  │  • complexity  │  ├──────────────────┤  │  • polarity  │  └──────────┘
-  │  • decompose   │  │ Blackboard       │  │  • supersede │
-  │  • RetrPolicy  │  │  • shared facts  │  └──────┬───────┘
-  └────────────────┘  └────────┬─────────┘         │
-                               │                   ▼
-      ┌────────────────────────┼────────────┐  ┌──────────────┐
-      │                        │            │  │ Synthesizer  │
-      ▼                        ▼            ▼  │  extractive  │
-┌───────────┐          ┌───────────┐  ┌───────────┐  or Claude │
-│ Technical │          │ Business  │  │Compliance │           │
-│  Agent    │          │  Agent    │  │  Agent    │           │
-└─────┬─────┘          └─────┬─────┘  └─────┬─────┘           │
-      │                      │              │                 │
-      ▼                      ▼              ▼                 ▼
-┌──────────────┐     ┌──────────────┐  ┌──────────────┐   Answer
-│ VectorStore  │     │ VectorStore  │  │ VectorStore  │   • text
-│  technical   │     │  business    │  │  compliance  │   • citations
-│ dense + BM25 │     │ dense + BM25 │  │ dense + BM25 │   • conflicts
-└──────────────┘     └──────────────┘  └──────────────┘   • confidence
-          └──────────────── KnowledgeBase ───────────────┘
-                     versioned, incrementally ingestable
+                                     user query
+                                          v
+          +---------------------------------------------------------------+
+          |                        RAGOrchestrator                        |
+          | plan -> phase 1 -> phase 2 -> resolve -> synthesise -> record |
+          +---------------------------------------------------------------+
+             |                           |                           |                     |
+             v                           v                           v                     v
+  +--------------------+ +------------------------------+  +------------------+   +-----------------+
+  |  QueryClassifier   | |   MessageBus + Blackboard    |  | ConflictResolver |   | MetricsRegistry |
+  | - routing          | | - typed messages, transcript |  | - numeric        |   +-----------------+
+  | - intent           | | - shared facts (context)     |  | - polarity       |
+  | - complexity       | +------------------------------+  | - supersession   |
+  | - decompose        |                                   +------------------+
+  | - retrieval policy |                                             |
+  +--------------------+                                             |
+                                                                     v                  Answer
+                                                           +-----------------------+    - cited text
+                                                           |      Synthesizer      |--> - conflicts
+                                                           | extractive, or Claude |    - confidence
+                                                           +-----------------------+    - timings
+```
+
+The orchestrator fans out to four components, then synthesises their output
+into a cited answer. The domain agents that actually retrieve evidence sit one
+level down, fed by the message bus shown above:
+
+```
+                                 +----------------------+
+                                 |      MessageBus      |
+                                 | (from diagram above) |
+                                 +----------------------+
+           |------------------------------|------------------------------|
+           v                              v                              v
+  +-----------------+            +----------------+            +------------------+
+  | Technical Agent |            | Business Agent |            | Compliance Agent |
+  +-----------------+            +----------------+            +------------------+
+           |                              |                              |
+           |                              |                              |
+           v                              v                              v
+  +--------------+               +--------------+              +--------------+
+  | VectorStore  |               | VectorStore  |              | VectorStore  |
+  |  technical   |               |   business   |              |  compliance  |
+  | dense + BM25 |               | dense + BM25 |              | dense + BM25 |
+  +--------------+               +--------------+              +--------------+
+
+  +------------KnowledgeBase (versioned, incrementally ingestable)------------+
 ```
 
 ## 2. Request lifecycle
@@ -60,33 +74,33 @@ other, which reduces "multi-agent" to several independent searches sharing an
 output format.
 
 ```
- user │ Orchestrator │ Classifier │ Technical │ Blackboard │ Compliance │ Resolver
-──────┼──────────────┼────────────┼───────────┼────────────┼────────────┼─────────
-  Q ──▶              │            │           │            │            │
-      │  classify ──▶ │           │            │            │            │
-      │              │ domains={technical, compliance}      │            │
-      │              │ intent=procedural, complexity=0.42   │            │
-      │              │ decompose into 2 scoped sub-queries   │            │
-      │   seed ctx ──────────────────────────▶ │            │            │
-      │              │            │           │            │            │
-      │ ══ PHASE 1 (primary domain, sequential, unexpanded) ═══════════════
-      │  REQUEST ───────────────▶ │           │            │            │
-      │              │     search own namespace │           │            │
-      │              │     extract + score claims           │            │
-      │              │     PARTIAL: environment=production ▶│            │
-      │  ◀── RESULT ───────────── │           │            │            │
-      │              │            │           │            │            │
-      │ ══ PHASE 2 (supporting domains, concurrent, context-expanded) ════
-      │  REQUEST ──────────────────────────────────────────▶ │           │
-      │              │            │           │  read ctx ──▶│           │
-      │              │     query + "production, change control"          │
-      │              │            │           │            │ search     │
-      │  ◀── RESULT ─────────────────────────────────────── │           │
-      │              │            │           │            │            │
-      │  detect + resolve conflicts ─────────────────────────────────▶   │
-      │  ◀── 1 conflict: policy(2 reviewers) overrules runbook(1)        │
-      │  synthesise → cite → score confidence → record metrics           │
-  A ◀──              │            │           │            │            │
+user  Orchestrator  Classifier  Technical  Blackboard  Compliance  Resolver
++-----+-------------+-----------+----------+-----------+-----------+-----------------------------
+Q ---->             |           |          |           |           |
+|     - classify --->           |          |           |           |
+|     |               domains = {technical, compliance}            |
+|     |               intent = procedural, complexity = 0.42       |
+|     |               decompose into 2 scoped sub-queries          |
+|     - seed ctx -------------------------->           |           |
+|     |             |           |          |           |           |
+== PHASE 1  (primary domain, sequential, unexpanded) ============================================
+|     - REQUEST ---------------->          |           |           |
+|     |             |             search own namespace |           |
+|     |             |             extract + score claims           |
+|     |             |           - PARTIAL: environment=production  |
+|     < RESULT ------------------          |           |           |
+|     |             |           |          |           |           |
+== PHASE 2  (supporting domains, concurrent, context-expanded)  =================================
+|     - REQUEST --------------------------------------->           |
+|     |             |           |          - read ctx ->           |
+|     |             |           |          |             query += "production, change control"
+|     |             |           |          |             search    |
+|     < RESULT -----------------------------------------           |
+|     |             |           |          |           |           |
+|     - detect + resolve conflicts -------------------------------->
+|     < 1 conflict: policy(2 reviewers) overrules runbook(1) -------
+|       synthesise -> cite -> score confidence -> record metrics   |
+< -----
 ```
 
 **Why phase 1 runs unexpanded.** Expanding the primary query with context
@@ -353,18 +367,18 @@ routed to means a cue-lexicon problem. The aggregate number hides all three.
 ## 4. Data model
 
 ```
-Document ──1:N──▶ Chunk ──retrieved as──▶ RetrievedChunk ──1:N──▶ Claim
-    │                                          │                    │
-    │ doc_id, domain, title, section           │ score (RRF)        │ char span
-    │ authority, version, effective_date       │ relevance [0,1]    │ confidence
-    │ supersedes, status, tags, text           │ dense/lexical      │ polarity
-    │                                          │ + ranks            │ measurements
-    └── authority_weight, effective            └── describe()       └── components
+Document --1:N-->                           Chunk --retrieved as-->           RetrievedChunk --1:N--> Claim
+|                                           |                                 |
+| doc_id, domain, title, section            | score (RRF)                     | char span
+| authority, version, effective_date        | relevance [0,1]                 | confidence
+| supersedes, status, tags, text            | dense/lexical                   | polarity
+|                                           | + ranks                         | measurements
++--authority_weight, effective              +--describe()                     +--components
 
-Claim ──pairs──▶ Conflict ──┐
-                            ├──▶ Answer ──▶ Citation ──verify──▶ source span
-Claim ──kept───▶ synthesis ─┘       │
-                                    └── confidence, notes, degraded, timings
+Claim --pairs--> Conflict --+
+                             |--> Answer --> Citation --verify--> source span
+Claim --kept---> synthesis -+       |
+                                     +-- confidence, notes, degraded, timings
 ```
 
 Document metadata is not decoration: `authority`, `effective_date`, `version`,
