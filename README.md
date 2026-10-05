@@ -28,14 +28,14 @@ seconds, and the 58-test suite in a few more.
 
 ### Demo
 
-<video src="docs/media/demo.mp4" controls muted playsinline poster="docs/media/demo_poster.jpg" width="100%"></video>
+![33-second annotated walkthrough: a fresh clone, one --explain call, and a guided tour of the routing scores, decomposition, synthesized answer, resolved conflict, citations, agent transcript and citation audit](docs/media/demo.gif)
 
 33-second walkthrough of one `--explain` call against a fresh clone: multi-label
 routing with confidence scores, query decomposition, the synthesized answer,
 the detected contradiction and how it was resolved, citations, the inter-agent
 message transcript, and the citation audit — all produced by a single real
-invocation, annotated after the fact for clarity. (If the player above doesn't
-render in your viewer, open [`docs/media/demo.mp4`](docs/media/demo.mp4) directly.)
+invocation, annotated after the fact for clarity. Full-quality version:
+[`docs/media/demo.mp4`](docs/media/demo.mp4).
 
 ---
 
