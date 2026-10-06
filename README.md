@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 58-test suite in a few more.
+seconds, and the 51-test suite in a few more.
 
 ### Demo
 
@@ -46,7 +46,7 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 58 tests, 2-10s
+python -m pytest tests/ -q                 # 51 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
@@ -311,7 +311,7 @@ capability visibly changes behaviour:
 ├── data/synthetic/               # 49 documents across 3 domains + an update fixture
 │   └── README.md                 # provenance, record schema, planted conflicts
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 58 tests
+├── tests/test_scenarios.py       # 51 tests
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
@@ -351,7 +351,7 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q          # 58 tests
+python -m pytest tests/ -q          # 51 tests
 python -m doctest rag_system/protocol.py rag_system/utils.py
 ```
 
@@ -411,59 +411,45 @@ Stated plainly, with what production would change set out in
 
 [`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md)
 — a design for one automation platform serving business users and power users
-without becoming two platforms.
+without becoming two platforms. ~1,600 words, four diagrams, meant to be read
+start to finish in under ten minutes.
 
-**The argument in short.** The brief frames this as simplicity versus power, as if
-there were one dial the two audiences wanted in different positions. If that were
-true it would be unsolvable. It isn't: both audiences are describing the same
-workflows at different levels of abstraction, so the real question is whether one
-system can support several notations over a single shared artifact.
+**The argument in short.** The brief frames this as simplicity versus power, as
+if there were one dial the two audiences wanted in different positions. If that
+were true, two platforms would be the honest answer. It isn't true: both
+audiences are describing the same workflows at different levels of detail, so
+the real question is whether several notations can sit over one shared
+document.
 
-What actually breaks existing platforms is the **one-way door** — "convert to code"
-with no way back (Unreal's Blueprints, Power Automate's two products sharing a
-brand). The moment that door shuts behind a workflow, you have two platforms with a
-trapdoor between them, and every symptom in the brief follows.
+**Four moves carry the design**, one per required section:
 
-Five load-bearing decisions:
+1. **Architecture** — one canonical IR; canvas, code editor, and wizard are
+   projections over it, not three products. Control flow is always declarative
+   (so always drawable); custom logic lives inside typed blocks, which stay
+   *representable* on the canvas even where they aren't *expandable*.
+2. **UX strategy** — escalation happens per node, not per user or per
+   workflow: one step of a workflow can move to code while the rest stays
+   exactly as simple as it was. "Publish as block" turns one power user's code
+   into every business user's drag-and-drop node — the two audiences are a
+   supply chain, not a conflict.
+3. **Technical implementation** — nodes and edges are keyed maps (a merge
+   property, not a style choice), surfaces write typed patches instead of
+   whole-document saves (so a canvas drag structurally cannot overwrite a code
+   comment), and blocks are the single extension mechanism, used the same way
+   by engineers and the platform team alike.
+4. **Long-term maintainability** — review is keyed on a workflow's declared
+   effects and blast radius, never on whether it was built by dragging or by
+   coding; schema changes are additive-only, forever.
 
-1. **One canonical IR; every surface is a projection over it.** The canvas and the
-   code editor are both *views*. Neither owns state the other cannot see.
-2. **Declarative orchestration, encapsulated computation.** Control flow is always
-   declarative and therefore always drawable; arbitrary code lives inside typed
-   blocks and so stays *representable* even where it isn't expandable. This is the
-   structural move that makes bidirectionality achievable rather than a promise to
-   write a decompiler.
-3. **Escalation is local and reversible** — per node, not per workflow, enforced by
-   a property-based round-trip test in CI rather than asserted in documentation.
-4. **Power users supply business users.** "Publish as block" turns one engineer's
-   custom logic into every business user's drag-and-drop node. The two audiences
-   are a supply chain, not a conflict.
-5. **Governance keys on blast radius and declared effects, never on authoring
-   method.** Dragging boxes to move money is still moving money.
+It closes with a short, honest **"What this doesn't solve"** section (encapsulated
+code staying unreadable by design, no CRDT-level co-editing of a single node,
+no story for merging two *already-separate* platforms) rather than a long risk
+register — four real gaps, not a hedge.
 
-It opens with a **one-page executive summary** giving the whole answer in about two
-minutes, so the depth below is optional supporting material rather than a
-prerequisite, and a table pointing at the section for each required area.
-
-The document covers all four required areas — architecture, UX strategy, technical
-implementation, long-term maintainability — with ASCII diagrams, concrete IR/block/run
-schemas, a worked example of one workflow shown simultaneously as a canvas, as YAML
-and as a code block, a build-versus-buy inventory, a risk table, and a four-phase
-delivery sequence. It also argues the uncomfortable sequencing point: build the IR
-and the projection discipline in phase 1, *before any user can benefit from them*,
-because shipping a visual builder whose state lives in UI components is exactly how
-platforms end up unable to add a code path later.
-
-§6.1 states four gaps the design does **not** solve: the chicken-and-egg problem the
-roadmap creates (power users arrive in month 6, but they are who builds the initial
-block catalog), template divergence after a fork, the circularity in the canvas
-scalability answer, and the fact that only half the effects model is mechanically
-enforceable — a sandbox can prove a block opened no socket, but nothing can verify
-its claim to have written no financial data.
-
-The success metric proposed is the **descent rate** — business users continuing to
-edit, on the canvas, workflows that contain power users' code. If that is zero, the
-one-way door exists in practice whatever the architecture diagram claims.
+The success metric proposed is the **descent rate** — business users continuing
+to edit, on the canvas, workflows that contain power users' code. If that's
+zero, the one-way door exists in practice whatever the architecture diagram
+claims.
 
 ---
 
