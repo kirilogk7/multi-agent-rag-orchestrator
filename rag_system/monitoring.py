@@ -17,7 +17,7 @@ import statistics
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 @dataclass

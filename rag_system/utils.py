@@ -17,7 +17,7 @@ import math
 import re
 import time
 import unicodedata
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple

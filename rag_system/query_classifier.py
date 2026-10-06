@@ -30,10 +30,10 @@ import json
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -42,7 +42,6 @@ from .utils import (
     _stem as _stem_token,
     cosine_similarity,
     get_logger,
-    minmax_normalize,
     normalize_text,
     tokenize,
     truncate,

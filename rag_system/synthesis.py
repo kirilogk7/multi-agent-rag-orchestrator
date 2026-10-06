@@ -22,14 +22,12 @@ assignment's three "advanced" requirements actually live:
 
 from __future__ import annotations
 
-import math
 import os
-import re
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .utils import (
     DOMAIN_PRECEDENCE,
@@ -90,7 +88,7 @@ OBLIGATION_MARKERS: frozenset = frozenset({
     "must", "required", "require", "requires", "shall", "mandatory", "prohibited",
     "forbidden", "may", "cannot", "need", "needs", "should", "obliged", "expected",
     "permitted", "allowed", "blocked", "rejected", "enforced", "triggers",
-    "approved", "approval", "requires", "withdrawn", "banned",
+    "approved", "approval", "withdrawn", "banned",
 })
 
 
@@ -188,7 +186,7 @@ class ClaimExtractor:
     #: (secrets management, on a question about deployment) outscored the
     #: deployment runbook's own rollout procedure, because authority and recency
     #: do not care what the question was.
-    WEIGHTS: Dict[str, float] = {
+    WEIGHTS: ClassVar[Dict[str, float]] = {
         "relevance": 0.36,
         "salience": 0.26,
         "authority": 0.22,
@@ -437,7 +435,7 @@ class ConflictResolver:
             cannot produce an unreadable answer.
     """
 
-    WEIGHTS: Dict[str, float] = {
+    WEIGHTS: ClassVar[Dict[str, float]] = {
         "authority": 0.34,
         "domain_precedence": 0.26,
         "recency": 0.22,
@@ -1173,7 +1171,6 @@ class ClaudeSynthesizer(Synthesizer):
             return baseline
 
         try:
-            import anthropic
             client = self._ensure_client()
             response = client.messages.create(
                 model=self.model,

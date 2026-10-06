@@ -26,7 +26,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .domain_agents import AgentContribution, ContextExtractor, DomainAgent, build_agents
 from .monitoring import MetricsRegistry, QueryRecord
@@ -34,16 +34,13 @@ from .protocol import Blackboard, CLASSIFIER, MessageBus, MessageType, ORCHESTRA
 from .query_classifier import Classification, QueryClassifier, SubQuery
 from .synthesis import (
     Answer,
-    Claim,
-    ClaimExtractor,
     ClaudeSynthesizer,
-    Conflict,
     ConflictResolver,
     ExtractiveSynthesizer,
     Synthesizer,
     verify_citations,
 )
-from .utils import DOMAINS, Document, Stopwatch, get_logger, load_corpus, truncate
+from .utils import Document, Stopwatch, get_logger, load_corpus
 from .vector_store import KnowledgeBase
 
 LOGGER = get_logger(__name__)

@@ -22,13 +22,12 @@ domain before the supporting ones rather than fanning all of them out at once.
 
 from __future__ import annotations
 
-import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .monitoring import AgentRecord
-from .protocol import Blackboard, BROADCAST, Message, MessageBus, MessageType, ORCHESTRATOR
+from .protocol import Blackboard, BROADCAST, MessageBus, MessageType, ORCHESTRATOR
 from .query_classifier import SubQuery
 from .synthesis import Claim, ClaimExtractor
 from .utils import RetrievedChunk, Stopwatch, get_logger, normalize_text, truncate
