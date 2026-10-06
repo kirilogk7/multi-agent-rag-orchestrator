@@ -18,11 +18,11 @@ user's reach for good.
 The design here keeps that door open in both directions:
 
 ```
-   canvas             code editor         wizard
- (drag, drop)         (text, diff)     (guided form)
-       \                  |                  /
-        \                 |                 /
-         +---------- typed patches --------+
+  canvas       code editor      wizard        API / SDK
+(drag, drop)   (text, diff)  (guided form)  (power users,
+     |              |              |          automation)
+     |              |              |              |
+     +--------------+------ typed patches --------+
                           |
                           v
                 +----------------------+
@@ -34,9 +34,20 @@ The design here keeps that door open in both directions:
                    execution engine
 ```
 
-Canvas, code editor, and wizard are three *views* of one document, not three
-products. None of them can see state the others can't, and none of them
-saves by overwriting the whole file — more on why that matters in Section 3.
+Canvas, code editor, wizard, and a plain REST API are four *views* of one
+document, not four products. None of them can see state the others can't,
+and none of them saves by overwriting the whole file — more on why that
+matters in Section 3.
+
+**Interface connections.** Every surface — including the API — talks to the
+IR through the same patch endpoint; there is no separate "canvas service"
+and "code service" with their own state to keep in sync. This is also the
+answer to the brief's "direct API access" requirement for power users: the
+API isn't a bolt-on for integrations, it's a first-class client of the same
+document model the canvas uses, so a power user can create or edit a
+workflow by script, CI pipeline, or CLI, and see the result on the canvas
+immediately — because it's the same file, reached through the same patch
+contract, not a parallel one.
 
 ## 1. Architecture design
 
@@ -57,10 +68,17 @@ between "representable" and "expandable," and it's what makes the canvas
 trustworthy around code it can't render — it never needs to.
 
 **Why this is one platform and not two with a shared login:** there's one
-document schema, one execution engine, and three renderers. A power user's
+document schema, one execution engine, and four renderers. A power user's
 change is visible on the canvas the moment they save, because it's the same
 file. There's no sync step, no export/import, no "convert to code" button
 that severs the connection.
+
+**This is also what makes progressive disclosure structural rather than a UI
+convention.** Because every rung reads and writes the same document through
+the same patch contract, "disclosing more power" never means switching to a
+different system with its own save format — it means the *same* document
+accepting a more detailed patch than before. Section 2 walks through what a
+user actually experiences climbing that ladder.
 
 ## 2. User experience strategy
 
@@ -123,7 +141,55 @@ for free composition once someone outgrows templates. Code is never the
 entry point; it's where one *node* ends up after a business user asks for
 something the catalog doesn't have yet.
 
+**Interface design: one screen, three panels, always visible together.**
+The rung a node is on is never hidden behind a mode switch — a business
+user sees the escalated node sitting in their canvas, not a separate
+"advanced" screen:
+
+```
++--------------------------------------------------------------+
+| Invoice approval   * business-critical  [Test][Publish]      |
++-----------+----------------------------------+---------------+
+| CATALOG   |  CANVAS                          | INSPECTOR     |
+|           |                                  |               |
+| [search]  |   +---------+                    | node: Calc tax|
+|           |   | Invoice |                    |               |
+| Suggested |   +---------+                    | effects:      |
+|  Tax      |        |                         |   writes:fin. |
+|  Approval |        v                         |               |
+|  Payment  |   +-----------+                  | > view source |
+|           |   | Calc tax  |<ok>              | > owner, tests|
+| My team   |   +-----------+                  |               |
+|  ...      |        |                         | ^ rung 5      |
++-----------+----------------------------------+---------------+
+| Effects: writes:finance   cost: EUR 0.004/run                |
++--------------------------------------------------------------+
+```
+
+Catalog on the left (templates and published blocks, searchable); canvas in
+the middle (the workflow itself); inspector on the right, which is where
+escalation actually happens — selecting a node shows its rung, its declared
+effects, and a one-click path to the next rung up or down. A business user
+never has to know "rung 5" is code to work around a node that's on it; they
+see effects, an owner, and a test badge, which is all the inspector promises
+at any rung.
+
 ## 3. Technical implementation
+
+**Key components — six pieces, each doing one job:**
+
+| Component | Job |
+|---|---|
+| IR store | holds the canonical workflow document, versioned |
+| Projection renderers | canvas, code editor, wizard, API — one per surface |
+| Patch validator | accepts/rejects typed ops before they touch the IR |
+| Block registry | typed ports, declared effects, owner, certification tier |
+| Durable scheduler | runs the DAG, retries, backoff, timers, human waits |
+| Run log | event-sourced; every step replayable for debugging |
+
+Everything below follows from how these six talk to each other — never by
+reaching into one another's internals, only through the IR and the patches
+in front of it.
 
 **The IR is a keyed document, not a list.** Nodes and edges are maps keyed
 by stable id, not arrays — so two people adding a node each append at a
@@ -191,6 +257,21 @@ built. Governance reads the *effects* a workflow declares, not its
 authorship method — which also means a business user is never blocked from
 shipping something safe just because the platform can't tell how it was
 made.
+
+**Adding capabilities is the flywheel from Section 2, not a separate
+process.** Every "publish as block" event adds a capability to the platform
+without a release cycle — the catalog's growth rate is a measurable side
+effect of ordinary usage, not something a roadmap has to schedule.
+
+**Community governance: certification is a ladder, not a gate.** A new
+block starts `uncertified`, visible only within its author's team — nothing
+stops anyone from using it there. Promotion to `community` (visible
+platform-wide) requires a declared owner and a passing test; `verified`
+adds a platform-team review of its declared effects; `core` is reserved for
+blocks the platform team owns outright. This only governs who else can
+*find* a block in the shared catalog, never who can build one — so
+publishing something half-finished to your own team never breaks anyone
+else's workflow.
 
 **Schema changes are additive, forever.** New fields are optional; an
 existing field's meaning never changes within a major version; unknown

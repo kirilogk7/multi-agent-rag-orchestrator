@@ -411,8 +411,7 @@ Stated plainly, with what production would change set out in
 
 [`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md)
 — a design for one automation platform serving business users and power users
-without becoming two platforms. ~1,600 words, four diagrams, meant to be read
-start to finish in under ten minutes.
+without becoming two platforms.
 
 **The argument in short.** The brief frames this as simplicity versus power, as
 if there were one dial the two audiences wanted in different positions. If that
@@ -423,23 +422,32 @@ document.
 
 **Four moves carry the design**, one per required section:
 
-1. **Architecture** — one canonical IR; canvas, code editor, and wizard are
-   projections over it, not three products. Control flow is always declarative
-   (so always drawable); custom logic lives inside typed blocks, which stay
-   *representable* on the canvas even where they aren't *expandable*.
+1. **Architecture** — one canonical IR; canvas, code editor, wizard, and a
+   plain REST API are projections over it, not four products — the API is
+   how power users get direct programmatic access without a parallel system.
+   Control flow is always declarative (so always drawable); custom logic
+   lives inside typed blocks, which stay *representable* on the canvas even
+   where they aren't *expandable*.
 2. **UX strategy** — escalation happens per node, not per user or per
    workflow: one step of a workflow can move to code while the rest stays
    exactly as simple as it was. "Publish as block" turns one power user's code
    into every business user's drag-and-drop node — the two audiences are a
-   supply chain, not a conflict.
-3. **Technical implementation** — nodes and edges are keyed maps (a merge
-   property, not a style choice), surfaces write typed patches instead of
-   whole-document saves (so a canvas drag structurally cannot overwrite a code
-   comment), and blocks are the single extension mechanism, used the same way
-   by engineers and the platform team alike.
+   supply chain, not a conflict. One screen holds catalog, canvas, and an
+   inspector together, so escalating a node never means leaving to a
+   different view.
+3. **Technical implementation** — six components (IR store, per-surface
+   renderers, patch validator, block registry, scheduler, run log), each
+   talking to the others only through the IR. Nodes and edges are keyed maps
+   (a merge property, not a style choice), surfaces write typed patches
+   instead of whole-document saves (so a canvas drag structurally cannot
+   overwrite a code comment), and blocks are the single extension mechanism,
+   used the same way by engineers and the platform team alike.
 4. **Long-term maintainability** — review is keyed on a workflow's declared
    effects and blast radius, never on whether it was built by dragging or by
-   coding; schema changes are additive-only, forever.
+   coding; schema changes are additive-only, forever; and a four-tier
+   certification ladder (`uncertified -> community -> verified -> core`)
+   governs who else can *find* a published block without ever gating who
+   can build one.
 
 It closes with a short, honest **"What this doesn't solve"** section (encapsulated
 code staying unreadable by design, no CRDT-level co-editing of a single node,
