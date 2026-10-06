@@ -92,35 +92,61 @@ print(orchestrator.explain(answer.trace_id))
 ## Architecture at a glance
 
 ```
-                             user query
-                                  │
-   ┌──────────────────────────────▼──────────────────────────────────┐
-   │                        RAGOrchestrator                          │
-   │  plan ─▶ phase 1 ─▶ phase 2 ─▶ resolve ─▶ synthesise ─▶ record  │
-   └──┬──────────────┬───────────────────────┬──────────────┬────────┘
-      ▼              ▼                       ▼              ▼
-┌─────────────┐ ┌──────────────┐  ┌────────────────┐  ┌──────────┐
-│QueryClassif.│ │ MessageBus   │  │ConflictResolver│  │ Metrics  │
-│ routing     │ │ + Blackboard │  │ numeric        │  │ Registry │
-│ intent      │ │ typed msgs,  │  │ polarity       │  └──────────┘
-│ complexity  │ │ transcript,  │  │ supersession   │
-│ decompose   │ │ shared facts │  └───────┬────────┘
-│ retr. policy│ └──────┬───────┘          ▼
-└─────────────┘        │           ┌──────────────┐
-                       │           │ Synthesizer  │─▶ Answer
-   ┌───────────────────┼───────────┐  extractive  │   • cited text
-   ▼                   ▼           ▼  │ or Claude │   • conflicts
-┌──────────┐    ┌──────────┐  ┌──────────────┐    │   • confidence
-│Technical │    │ Business │  │  Compliance  │    │   • timings
-│  Agent   │    │  Agent   │  │    Agent     │    │
-└────┬─────┘    └────┬─────┘  └──────┬───────┘    │
-     ▼               ▼               ▼
-┌──────────┐   ┌──────────┐   ┌──────────────┐
-│VectorStore   │VectorStore│  │ VectorStore  │   per-domain namespaces,
-│ dense+BM25│  │dense+BM25 │  │ dense + BM25 │   hybrid retrieval, MMR
-└──────────┘   └──────────┘   └──────────────┘
-       └────────────── KnowledgeBase ─────────────┘
-                versioned, incrementally ingestable
+                                 user query
+                                      v
+      +---------------------------------------------------------------+
+      |                        RAGOrchestrator                        |
+      | plan -> phase 1 -> phase 2 -> resolve -> synthesise -> record |
+      +---------------------------------------------------------------+
+            |                |                |                 |
+            v                v                v                 v
+    +---------------+ +------------+ +----------------+ +---------------+
+    |QueryClassifier| | MessageBus | |ConflictResolver| |MetricsRegistry|
+    |    routing    | |+ Blackboard| |    numeric     | +---------------+
+    |    intent     | |typed msgs, | |    polarity    |
+    |  complexity   | |transcript, | |  supersession  |
+    |   decompose   | |shared facts| +----------------+
+    | retr. policy  | +------------+
+    +---------------+
+                                              |
+                                              v
+                                    +---------------------+
+                                    |     Synthesizer     |
+                                    |extractive, or Claude|
+                                    +---------------------+
+                                               |
+                                               v
+                                         Answer
+                                         - cited text
+                                         - conflicts
+                                         - confidence
+                                         - timings
+```
+
+The message bus above feeds three domain agents, each with its own namespaced
+retriever:
+
+```
+                        +--------------------+
+                        |     MessageBus     |
+                        |(from diagram above)|
+                        +--------------------+
+                |------------------|------------------|
+                v                  v                  v
+        +---------------+  +--------------+  +----------------+
+        |Technical Agent|  |Business Agent|  |Compliance Agent|
+        +---------------+  +--------------+  +----------------+
+                |                  |                  |
+                |                  |                  |
+                v                  v                  v
+        +-----------+      +-----------+     +-----------+
+        |VectorStore|      |VectorStore|     |VectorStore|
+        | technical |      | business  |     |compliance |
+        |dense+BM25 |      |dense+BM25 |     |dense+BM25 |
+        +-----------+      +-----------+     +-----------+
+
+        +-----------------KnowledgeBase------------------+
+                 (versioned, incrementally ingestable)
 ```
 
 **Execution is two-phase, not a flat fan-out.** Phase 1 runs the primary domain
