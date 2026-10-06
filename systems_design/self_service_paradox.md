@@ -193,58 +193,58 @@ Everything below follows from five commitments:
 ### 2.1 System overview
 
 ```
-+--------------------------------------------------------------------------------------------------+
-| SURFACES                                           (all equal citizens -- none is "the real one")|
-|                                                                                                  |
-|  +----------+ +--------+ +--------+ +------------+ +--------+ +-----------+                      |
-|  | Template | | Wizard | | Canvas | | Expression | |  Code  | |   CLI /   |                      |
-|  | gallery  | | /forms | | editor | |    bar     | | editor | | SDK / API |                      |
-|  |  rung 0  | | rung 1 | | rung 2 | |   rung 3   | | rung 4 | |  rung 5   |                      |
-|  +----------+ +--------+ +--------+ +------------+ +--------+ +-----------+                      |
-+--------------------------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| SURFACES                   (all equal citizens -- none is "the real one")|
+|                                                                          |
+|  +----------+ +--------+ +--------+ +--------+ +--------+ +--------+     |
+|  | Template | | Wizard | | Canvas | |  Expr  | |  Code  | | CLI /  |     |
+|  | gallery  | | /forms | | editor | |  bar   | | editor | |  SDK   |     |
+|  |  rung 0  | | rung 1 | | rung 2 | | rung 3 | | rung 4 | | rung 5 |     |
+|  +----------+ +--------+ +--------+ +--------+ +--------+ +--------+     |
++--------------------------------------------------------------------------+
 
-         ------------------------------+-------------------------------
-                                       | every surface reads and writes
-                                       | the SAME document, losslessly
-+--------------------------------------------------------------------------------------------------+
-| PROJECTION LAYER                                          <- the critical component; see 2.2, 4.2|
-|  - render : IR -> view model (canvas graph / form schema / formatted text)                       |
-|  - apply  : view edit -> typed IR patch (never a re-serialisation of the whole)                  |
-|  - preserve: layout, comments, formatting, unknown fields (round-trip safety)                    |
-+--------------------------------------------------------------------------------------------------+
-                                       v
-+--------------------------------------------------------------------------------------------------+
-| CANONICAL WORKFLOW IR                                               <- the single source of truth|
-|  typed DAG . stable node IDs . deterministic serialisation . text-diffable                       |
-+--------------------------------------------------------------------------------------------------+
-         |--------------------------------|--------------------------------|
-         v                                v                                v
- +------------------------------+ +------------------------------+ +------------------------------+
- | VALIDATION & COMPILE         | | BLOCK REGISTRY               | | POLICY ENGINE                |
- |- port type-check             | |- catalog + search            | |- policy-as-code (OPA-style)  |
- |- effect aggregation          | |- semver versions             | |- static eval, pre-run,       |
- |- cost estimate               | |- ownership                   | |  from declared effects       |
- |                              | |- certification               | |- blast-radius tiering        |
- |                              | |- usage stats                 | |- approval requirements       |
- +------------------------------+ +------------------------------+ +------------------------------+
-                 | immutable, validated workflow version
-                 v
-+--------------------------------------------------------------------------------------------------+
-| EXECUTION PLANE                                                                                  |
-|  Trigger router -> Planner -> Durable scheduler -> Step workers                                  |
-|                                         |- declarative evaluator                                 |
-|                                         |- expression sandbox                                    |
-|                                         |- code sandbox (isolate)                                |
-|                                         |- connector egress proxy                                |
-|  state store: event-sourced run log                                                              |
-+--------------------------------------------------------------------------------------------------+
-                 v
-+--------------------------------------------------------------------------------------------------+
-| OBSERVABILITY                                                                                    |
-|  per-run trace . per-step input/output inspection . replay . cost attribution                    |
-|  ONE run view for every rung -- a business user and an engineer debug the                        |
-|  same artifact with the same tool                                                                |
-+--------------------------------------------------------------------------------------------------+
+         ----------------------------+----------------------------
+                                     | every surface reads and writes
+                                     | the SAME document, losslessly
++--------------------------------------------------------------------------+
+| PROJECTION LAYER                                <- critical; see 2.2, 4.2|
+|  - render : IR -> view model (canvas graph/form schema/text)             |
+|  - apply  : view edit -> typed IR patch (never a full rewrite)           |
+|  - preserve: layout, comments, formatting, unknown fields                |
++--------------------------------------------------------------------------+
+                                     v
++--------------------------------------------------------------------------+
+| CANONICAL WORKFLOW IR                           <- single source of truth|
+|  typed DAG . stable node IDs . deterministic serial. . text-diffable     |
++--------------------------------------------------------------------------+
+         |------------------------|------------------------|
+         v                        v                        v
+ +----------------------+ +----------------------+ +----------------------+
+ | VALIDATION & COMPILE | | BLOCK REGISTRY       | | POLICY ENGINE        |
+ |- port type-check     | |- catalog + search    | |- policy-as-code      |
+ |- effect aggregation  | |- semver versions     | |- static eval,        |
+ |- cost estimate       | |- ownership           | |  pre-run             |
+ |                      | |- certification       | |- blast-radius        |
+ |                      | |- usage stats         | |  tiering             |
+ +----------------------+ +----------------------+ +----------------------+
+             | immutable, validated workflow version
+             v
++--------------------------------------------------------------------------+
+| EXECUTION PLANE                                                          |
+|  Trigger -> Planner -> Durable scheduler -> Step workers                 |
+|                               |- declarative evaluator                   |
+|                               |- expression sandbox                      |
+|                               |- code sandbox (isolate)                  |
+|                               |- connector egress proxy                  |
+|  state store: event-sourced run log                                      |
++--------------------------------------------------------------------------+
+             v
++--------------------------------------------------------------------------+
+| OBSERVABILITY                                                            |
+|  per-run trace . per-step I/O inspection . replay . cost attribution     |
+|  ONE run view for every rung -- a business user and an engineer          |
+|  debug the same artifact with the same tool                              |
++--------------------------------------------------------------------------+
 ```
 
 The shape to notice: **the surfaces are a wide, shallow layer, and everything below
@@ -286,34 +286,34 @@ approximation that corrupts people's work.
 So this design does not promise that. It draws a line:
 
 ```
-+--------------------------------------------------------------------------------+
-| ORCHESTRATION -- always declarative, therefore always renderable               |
-|                                                                                |
-| control flow . data flow . branching . looping over collections .              |
-| error handling . retries . timeouts . parallelism . scheduling .               |
-| approvals . waits                                                              |
-|                                                                                |
-| Expressed ONLY in the IR. There is no code path that can express               |
-| orchestration -- the SDK (rung 5) emits IR too. One notation for               |
-| structure means the canvas can always draw the structure.                      |
-+--------------------------------------------------------------------------------+
-                                         | nodes reference blocks
-                                         v
-+--------------------------------------------------------------------------------+
-| COMPUTATION -- arbitrary, encapsulated behind a typed interface                |
-|                                                                                |
-| +----------------------------------------------------------------------------+ |
-| | Block: calculate-tax @2.1                                                  | |
-| | in  : { amount: number, jurisdiction: string }   <- typed ports            | |
-| | out : { tax: number, breakdown: TaxLine[] }                                | |
-| | effects: [ pure ]                                <- declared               | |
-| | +------------------------------------------------------------------------+ | |
-| | | impl: typescript   <- opaque to the canvas, and that is fine           | | |
-| | | export default function(input) { /* 200 lines */ }                     | | |
-| | +------------------------------------------------------------------------+ | |
-| |                                                                            | |
-| +----------------------------------------------------------------------------+ |
-+--------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| ORCHESTRATION -- always declarative, therefore always renderable         |
+|                                                                          |
+| control flow . data flow . branching . looping over collections .        |
+| error handling . retries . timeouts . parallelism . scheduling .         |
+| approvals . waits                                                        |
+|                                                                          |
+| Expressed ONLY in the IR. There is no code path that can express         |
+| orchestration -- the SDK (rung 5) emits IR too. One notation for         |
+| structure means the canvas can always draw the structure.                |
++--------------------------------------------------------------------------+
+                                      | nodes reference blocks
+                                      v
++--------------------------------------------------------------------------+
+| COMPUTATION -- arbitrary, encapsulated behind a typed interface          |
+|                                                                          |
+| +----------------------------------------------------------------------+ |
+| | Block: calculate-tax @2.1                                            | |
+| | in  : { amount: number, jurisdiction: string }   <- typed ports      | |
+| | out : { tax: number, breakdown: TaxLine[] }                          | |
+| | effects: [ pure ]                                <- declared         | |
+| | +------------------------------------------------------------------+ | |
+| | | impl: typescript  <- opaque to the canvas, fine                  | | |
+| | | export default function(input) { /* 200 lines */ }               | | |
+| | +------------------------------------------------------------------+ | |
+| |                                                                      | |
+| +----------------------------------------------------------------------+ |
++--------------------------------------------------------------------------+
 ```
 
 A power user's 200-line tax function appears on a business user's canvas as a node
@@ -336,29 +336,32 @@ Six rungs. Every rung is **reversible**, **composable with every other rung in t
 same workflow**, and **applied per node rather than per workflow**.
 
 ```
-                     capability -------------------------------------------->
+                     capability ------------------------->
 
- rung 5  GitOps / SDK / API         | workflow-as-code in your own repo,
-          ########################  | CI, code review, the full platform API
-            ^                       | descend: `platform pull` opens the same workflow on canvas
-            v                       |
- rung 4  Code block                 | TypeScript/Python in a sandbox, typed
-          ####################      | ports, own tests, publishable as a block
-            ^                       | descend: delete the node; the rest of the workflow is untouched
-            v                       |
- rung 3  Expression                 | "{{ order.total * 1.2 }}" in any field,
-          #############             | autocomplete from the upstream schema
-            ^                       | descend: replace with a literal value
-            v                       |
- rung 2  Canvas composition         | drag blocks, draw edges, branch, loop
-          ###########
-            ^                       | descend: no-op; canvas is the home view
-            v                       |
- rung 1  Configure a template       | guided form, validated inputs
-          ######
-            ^                       | "customise" reveals the canvas beneath -- the template was always a workflow
-            v                       |
- rung 0  Run a template             | zero authoring
+ rung 5  GitOps / SDK / API     | workflow-as-code in your own repo,
+          ##############        | CI, code review, the full platform API
+            ^                   | descend: `platform pull` opens the same
+                                | workflow on canvas
+            v                   |
+ rung 4  Code block             | TypeScript/Python in a sandbox, typed
+          ############          | ports, own tests, publishable as a block
+            ^                   | descend: delete the node; the rest of the
+                                | workflow is untouched
+            v                   |
+ rung 3  Expression             | "{{ order.total * 1.2 }}" in any field,
+          ########              | autocomplete from the upstream schema
+            ^                   | descend: replace with a literal value
+            v                   |
+ rung 2  Canvas composition     | drag blocks, draw edges, branch, loop
+          #######
+            ^                   | descend: no-op; canvas is the home view
+            v                   |
+ rung 1  Configure a template   | guided form, validated inputs
+          ####
+            ^                   | "customise" reveals the canvas beneath --
+                                | the template was always a workflow
+            v                   |
+ rung 0  Run a template         | zero authoring
           ##
 ```
 
@@ -412,30 +415,40 @@ engineer later extends.
 **What the business user sees (rung 2, canvas):**
 
 ```
-                    +------------------+  trigger: webhook
+                    +------------------+
                     | Invoice received |
                     +------------------+
+                  trigger: webhook
+
                               | invoice
                               v
-                    +------------------+  <- block: calculate-tax@2.1
-                    |  Calculate tax   |     <code>  owner: @tax-eng  [ok] 14 tests
-                    +------------------+     [pure]                   <- effects badge
+                    +------------------+
+                    |  Calculate tax   |
+                    +------------------+
+                  block: calculate-tax@2.1  <code>  [ok] 14 tests
+                  owner: @tax-eng   effects: [pure]
+
                               | { tax, breakdown }
                               v
-                    +-------------------+  <- decision
+                    +-------------------+
                     | Over EUR 10,000 ? |
                     +-------------------+
+                  decision
+
                   yes |---------------------| no
                       v                     v
-            +------------------+  +-------------------+  <- approval blocks
+            +------------------+  +-------------------+
             |   CFO approval   |  | Director approval |
             +------------------+  +-------------------+
+          approval block        approval block
                       |                     |
                       -----------|-----------
                                  v
-                       +------------------+  <- block: pay-invoice@4.0
-                       | Schedule payment |     [network, writes:finance]
-                       +------------------+     tier: business-critical   <- blast-radius warning
+                       +------------------+
+                       | Schedule payment |
+                       +------------------+
+                     block: pay-invoice@4.0   [network, writes:finance]
+                     tier: business-critical  <- blast-radius warning
 ```
 
 **What the power user sees (rung 5, the same document in Git):**
@@ -445,14 +458,16 @@ schema: workflow/v1                      # explicit version -> migratable
 id: wf_invoice_approval
 name: Invoice approval
 owner: team:finance-ops
-tier: business-critical                  # drives governance, not authoring method
+# tier drives governance, not authoring method
+tier: business-critical
 
 triggers:
   - id: t1
     kind: webhook
     schema: { $ref: "schemas/invoice.json" }
 
-nodes:                                   # keyed by id: concurrent inserts merge
+# keyed by id: concurrent inserts merge
+nodes:
   n_tax:
     block: calculate-tax@2.1             # pinned major version
     inputs:
@@ -488,8 +503,9 @@ edges:
   e3: { from: n_cfo,       to: n_pay }
   e4: { from: n_director,  to: n_pay }
 
-ui:                                      # non-semantic; canvas owns this region,
-  nodes:                                 # code editor never rewrites it
+# non-semantic; canvas owns this region, code editor never rewrites it
+ui:
+  nodes:
     n_tax:       { x: 120, y: 240 }
     n_threshold: { x: 120, y: 360 }
   notes:
@@ -505,7 +521,7 @@ import { defineBlock } from "@platform/sdk";
 export default defineBlock({
   inputs:  { amount: "number", jurisdiction: "string" },
   outputs: { tax: "number", breakdown: "TaxLine[]" },
-  effects: ["pure"],                      // declared -> policy engine can verify
+  effects: ["pure"],      // declared -> policy engine can verify
   async run({ amount, jurisdiction }) {
     const rules = await loadRules(jurisdiction);
     return applyRules(amount, rules);     // 200 lines elsewhere
@@ -566,30 +582,30 @@ Two rules about transitions that are easy to get wrong:
 how much it reveals.
 
 ```
-+------------------------------------------------------------------------------------------+
-| Invoice approval            * business-critical   [Test] [Diff] [Publish]                |
-+----------------+------------------------------------------+------------------------------+
-| CATALOG        |  CANVAS                                  | INSPECTOR                    |
-|                |                                          | (selected: n_pay)            |
-| [search]       |    +---------+                           |                              |
-|                |    | Invoice |                           | Amount                       |
-| Suggested      |    +---------+                           | +--------------------------+ |
-|  Tax           |         v                                | | fx {{ total +            | |
-|  Approval      |    +----------+ <code> [ok]              | |     n_tax.tax }}         | |
-|  Payment       |    | Calc tax |                          | +--------------------------+ |
-|                |    +----------+                          |  ^ rung 3, inline            |
-| My team        |          v                               |                              |
-|  ...           |    +-----------+                         | Vendor                       |
-|                |    | Over 10k? |                         | [ invoice.vendor v ]         |
-| Cmd+K commands |    +-----------+                         |                              |
-|                |                                          | > Retry & timeout            |
-|                |                                          | > Error handling             |
-|                |                                          |  ^ collapsed by default      |
-|                |                                          |                              |
-+------------------------------------------------------------------------------------------+
-| [!] This workflow moves money. Publishing requires finance approval.                     |
-|   Effects: network, writes:finance, reads:pii     Est. cost: EUR 0.004/run               |
-+------------------------------------------------------------------------------------------+
++--------------------------------------------------------------------+
+| Invoice approval    * critical   [Test][Diff][Publish]             |
++--------------+----------------------+------------------------------+
+| CATALOG      | CANVAS               | INSPECTOR                    |
+|              |                      | (n_pay)                      |
+| [search]     | +---------+          |                              |
+|              | | Invoice |          | Amount                       |
+| Suggested    | +---------+          | +----------------+           |
+|  Tax         |      v               | |fx total +      |           |
+|  Approval    | +----------+         | | n_tax.tax      |           |
+|  Payment     | | Calc tax |         | +----------------+           |
+|              | +----------+         | ^ rung 3                     |
+| My team      | <code> [ok]          |                              |
+|  ...         |       v              | Vendor                       |
+|              | +-----------+        | [vendor v]                   |
+| Cmd+K        | | Over 10k? |        |                              |
+|              | +-----------+        | > Retry                      |
+|              |                      | > Errors                     |
+|              |                      | ^ collapsed                  |
+|              |                      |                              |
++--------------------------------------------------------------------+
+| [!] Moves money. Publishing requires finance approval.             |
+| Effects: network, writes:finance, reads:pii  cost: EUR 0.004/run   |
++--------------------------------------------------------------------+
 ```
 
 Specific decisions and their reasons:
@@ -698,7 +714,7 @@ Each surface implements two functions:
 
 ```
 render : (IR, viewContext) -> ViewModel
-apply  : (ViewEdit)        -> Patch[]          // typed ops, never a whole document
+apply  : (ViewEdit)        -> Patch[]   // typed ops, never a whole document
 ```
 
 Patches are the only way state changes:
@@ -709,8 +725,8 @@ type Patch =
   | { op: "removeNode"; id: NodeId }
   | { op: "setInput";   node: NodeId; port: string; value: InputBinding }
   | { op: "addEdge";    from: PortRef; to: PortRef }
-  | { op: "setUi";      node: NodeId; ui: Partial<UiAnnotation> }   // canvas-only region
-  | { op: "setSource";  block: BlockRef; source: string }           // verbatim bytes
+  | { op: "setUi";  node: NodeId; ui: Partial<UiAnnotation> }  // canvas-only
+  | { op: "setSource"; block: BlockRef; source: string }   // verbatim bytes
   | ...
 ```
 
@@ -750,13 +766,13 @@ The tractable version asserts **invariants**, each of which needs no oracle:
 ```
 for all valid IR documents d, surfaces s, valid edits e:
 
-  1. IDENTITY      parse(serialise(d)) == d                    # no edit at all
-  2. LOCALITY      regions of d untouched by e are BYTE-identical after the edit
-  3. REFLECTION    render(result, s) shows e applied            # the edit landed
-  4. IDidempotence apply(e) twice == apply(e) once              # where e is idempotent
+  1. IDENTITY      parse(serialise(d)) == d          # no edit at all
+  2. LOCALITY      regions untouched by e are byte-identical after the edit
+  3. REFLECTION    render(result, s) shows e applied  # the edit landed
+  4. IDEMPOTENCE   apply(e) twice == apply(e) once    # where e is idempotent
   5. STABILITY     serialise(parse(serialise(d))) == serialise(d)
-  6. CROSS-SURFACE render(d, canvas) and render(d, code) agree on node set,
-                   edges, and every input binding
+  6. CROSS-SURFACE render(d, canvas) and render(d, code) agree on
+                   node set, edges, and every input binding
 ```
 
 Invariant 2 is the one that catches real bugs: it is how you discover that saving
@@ -776,21 +792,22 @@ id: wf_<slug>
 name: string
 owner: team:<slug> | user:<id>
 tier: personal | team | business-critical      # -> governance requirements
-version: 7                                     # immutable; publishing increments
+version: 7                              # immutable; publishing increments
 state: draft | published | deprecated
 
-parameters:                     # what a template exposes; what a wizard renders
+parameters:               # what a template exposes; what a wizard renders
   - { name: threshold, type: number, default: 10000, locked: false }
 
 triggers: [ { id, kind: webhook|schedule|event|manual, config } ]
 
 # Nodes and edges are KEYED MAPS, not lists. This is a merge property, not a
-# style preference: two people each adding a node to a YAML *list* both append at
-# the same position and conflict, which would break the clean-merge claim in 4.2.
-# Keyed by stable id, concurrent insertions touch disjoint regions and merge.
+# style preference: two people each adding a node to a YAML *list* both
+# append at the same position and conflict, breaking the clean-merge claim
+# in 4.2. Keyed by stable id, concurrent insertions touch disjoint regions
+# and merge.
 nodes:
-  <NodeId>:                                    # stable, never reused
-    block: <name>@<major>          # OR kind: decision | loop | parallel | wait
+  <NodeId>:                                  # stable, never reused
+    block: <name>@<major>      # OR kind: decision | loop | parallel | wait
     inputs:
       <port>: { literal: any } | { ref: PortRef } | { expr: string }
     retry:   { attempts, backoff, retry_on }
@@ -800,12 +817,12 @@ nodes:
 edges:                          # keyed by edge id for the same reason
   <EdgeId>: { from: PortRef, to: PortRef }
 
-ui:                             # non-semantic. Canvas owns; code editor never writes
+ui:                   # non-semantic. Canvas owns; code editor never writes
   nodes:
     <NodeId>: { x, y, collapsed }
   notes: { <NodeId>: string }
-  # Annotations are keyed by node id and are garbage-collected when that node is
-  # removed, so deleting a commented node does not leave an orphaned note behind.
+  # Annotations are keyed by node id and are garbage-collected when that
+  # node is removed, so deleting a commented node leaves no orphaned note.
 
 x-unknown-preserved: {}         # forward compatibility: never dropped on save
 ```
@@ -821,17 +838,19 @@ visibility: private | team | org
 certification: core | verified | community | uncertified
 
 ports:
-  inputs:  { amount: {type: number, required: true}, jurisdiction: {type: string} }
+  inputs:
+    amount: {type: number, required: true}
+    jurisdiction: {type: string}
   outputs: { tax: {type: number}, breakdown: {type: "TaxLine[]"} }
 
 # Effects split by how far they can be trusted. Conflating the two would
 # overstate what the platform can guarantee -- see the note below the schema.
 effects:
-  enforced:                     # mechanically verifiable at the sandbox boundary
+  enforced:                 # mechanically verifiable at the sandbox boundary
     - pure                      #   no syscalls, no sockets, no filesystem
     - network: [api.vendor.com] #   egress proxy denies anything unlisted
     - filesystem: none
-  attested:                     # author's assertion; NOT mechanically verifiable
+  attested:               # author's assertion; NOT mechanically verifiable
     - reads: [pii]
     - writes: [finance]
     - cost: 0.004
@@ -896,7 +915,7 @@ trigger:  { kind, payload_ref }
 status:   queued | running | waiting | succeeded | failed | cancelled
 steps:
   - { node_id, attempt, status, started_at, ended_at,
-      input_ref, output_ref,                 # object storage; redacted by data class
+      input_ref, output_ref,      # object storage; redacted by data class
       error: { type, message, stack_ref } }
 cost: { compute, external_calls, total }
 ```
@@ -936,28 +955,35 @@ badly.
 ### 4.5 Execution model
 
 ```
-trigger -> +----------------+  validated, immutable workflow version
-           | Trigger router |
-           +----------------+
-                    v
-           +---------+  topological plan; parallelism discovered from the DAG --
-           | Planner |  a business user gets concurrency without knowing the word
-           +---------+
-                v
-           +-------------------+  durable: survives worker loss, process restart and deploys;
-           | Durable scheduler |  owns retries, backoff, timers, waits (human approvals are
-           +-------------------+  just long waits)
-                     |
-              |----------------------|-----------------|-------------------|
-              v                      v                 v                   v
-  +-----------------------+  +--------------+  +--------------+  +------------------+
-  | declarative evaluator |  | expr sandbox |  | code sandbox |  |    connector     |
-  |                       |  |              |  |  (isolate)   |  | via egress proxy |
-  +-----------------------+  +--------------+  +--------------+  +------------------+
-              |                      |                 |                   |
-              ------------------------------|-------------------------------
-                                            v
-                      event-sourced run log  -> trace view, replay, cost attribution
+trigger -> +--------------+
+           |Trigger router|
+           +--------------+
+validated, immutable workflow version
+                   v
+           +-------+
+           |Planner|
+           +-------+
+topological plan; parallelism from the DAG --
+a business user gets concurrency for free
+               v
+           +-----------------+
+           |Durable scheduler|
+           +-----------------+
+durable: survives worker loss, restart, deploy;
+owns retries, backoff, timers, waits (human
+approvals are just long waits)
+                    |
+            |-------------------|--------------|-------------|
+            v                   v              v             v
+ +---------------------+ +------------+ +------------+ +----------+
+ |declarative evaluator| |expr sandbox| |code sandbox| |connector |
+ |                     | |            | | (isolate)  | |via egress|
+ +---------------------+ +------------+ +------------+ +----------+
+            |                   |              |             |
+            ------------------------|-------------------------
+                                    v
+event-sourced run log -> trace view, replay,
+cost attribution
 ```
 
 Design points worth stating:
@@ -1042,26 +1068,29 @@ than merely survivable. The two audiences are not competing for one dial — the
 a **supply chain**, and the platform's central job is to shorten it.
 
 ```
-  +------------------+    hits a limit    +---------------------------+
-  |  Business user   |------------------->|        Power user         |---- "publish as block"
-  | builds on canvas |   asks for help    | writes code or a subgraph |   |
-  +------------------+                    +---------------------------+   |
-            ^                                                             |
-            |                                                             |
-            |                                                             |
-            |                                                     +-------v--------+
-            |                                                     | Block registry |
-            |                                                     |  typed ports   |
-            |                                                     |    effects     |
-            |                                                     |  owner, tests  |
-            |                                                     +----------------+
-            |                                                              |
-            |  appears as ONE drag-and-drop node,                          |
-            |---------------------------------------------------------------
-               with a form, in the catalog
+  +----------------+ hits a limit +--------------------+
+  | Business user  |------------->|     Power user     |
+  |builds on canvas|asks for help |writes code/subgraph|
+  +----------------+              +--------------------+
+           ^                                 |
+           |                                 | publish as block
+           |                                 v
+           |                          +--------------+
+           |                          |Block registry|
+           |                          | typed ports  |
+           |                          |   effects    |
+           |                          | owner, tests |
+           |                          +--------------+
+           |                                  |
+           | appears as ONE                   |
+           |-----------------------------------
+             drag-and-drop node
 
-Each loop: the catalog gains a capability, the next business user
-needs no help, and the power user's work is leveraged, not consumed.
+with a form, in the catalog.
+
+Each loop: the catalog gains a capability, the next
+business user needs no help, and the power user's
+work is leveraged, not consumed.
 ```
 
 Contrast with what happens without this mechanism: a power user helps a colleague by
@@ -1252,34 +1281,34 @@ Four phases. The sequencing argument matters more than the dates.
 
 ```
  Phase 1 -- 0-3 months -- "the spine"
-+------------------------------------------------------------------------------+
-| IR + schema + validator . deterministic serialiser . durable scheduler       |
-| canvas (rungs 0-2) . ~20 core blocks . one run/trace view                    |
-| round-trip property tests in CI from day one                                 |
-|                                                                              |
-| <- Ship visual-only. But the IR is already text-serialisable, already        |
-|    has stable IDs, already preserves unknown fields, already has a           |
-|    ui: region. No user can see any of that yet. It is still the most         |
-|    important work in the project.                                            |
-+------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| IR + schema + validator . deterministic serialiser . durable scheduler   |
+| canvas (rungs 0-2) . ~20 core blocks . one run/trace view                |
+| round-trip property tests in CI from day one                             |
+|                                                                          |
+| <- Ship visual-only. But the IR is already text-serialisable, already    |
+|    has stable IDs, already preserves unknown fields, already has a       |
+|    ui: region. No user can see any of that yet. It is still the most     |
+|    important work in the project.                                        |
++--------------------------------------------------------------------------+
 
  Phase 2 -- 3-6 months -- "depth"
-+------------------------------------------------------------------------------+
-| expressions (rung 3) with live preview . block SDK . registry                |
-| policy engine + tiering . observability: step I/O inspection, replay         |
-+------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| expressions (rung 3) with live preview . block SDK . registry            |
+| policy engine + tiering . observability: step I/O inspection, replay     |
++--------------------------------------------------------------------------+
 
  Phase 3 -- 6-9 months -- "the escape hatch, in both directions"
-+------------------------------------------------------------------------------+
-| code blocks (rung 4) + sandbox + egress proxy . promote-subgraph-to-block    |
-| <- the flywheel starts turning here; descent rate becomes measurable         |
-+------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| code blocks (rung 4) + sandbox + egress proxy . promote-subgraph-to-block|
+| <- the flywheel starts turning here; descent rate becomes measurable     |
++--------------------------------------------------------------------------+
 
  Phase 4 -- 9-12 months -- "the ecosystem"
-+------------------------------------------------------------------------------+
-| CLI / SDK / GitOps (rung 5) . marketplace . certification . migrations       |
-| domain champions onboarded . deprecation tooling                             |
-+------------------------------------------------------------------------------+
++--------------------------------------------------------------------------+
+| CLI / SDK / GitOps (rung 5) . marketplace . certification . migrations   |
+| domain champions onboarded . deprecation tooling                         |
++--------------------------------------------------------------------------+
 ```
 
 **The sequencing insight, which is the main practical claim of this section:** build
