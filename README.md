@@ -34,8 +34,7 @@ seconds, and the 51-test suite in a few more.
 routing with confidence scores, query decomposition, the synthesized answer,
 the detected contradiction and how it was resolved, citations, the inter-agent
 message transcript, and the citation audit — all produced by a single real
-invocation, annotated after the fact for clarity. Full-quality version:
-[`docs/media/demo.mp4`](docs/media/demo.mp4).
+invocation, annotated after the fact for clarity.
 
 ---
 
