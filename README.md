@@ -548,13 +548,24 @@ document.
    (a merge property, not a style choice), surfaces write typed patches
    instead of whole-document saves (so a canvas drag structurally cannot
    overwrite a code comment), and blocks are the single extension mechanism,
-   used the same way by engineers and the platform team alike.
+   used the same way by engineers and the platform team alike. Two document
+   schemas are shown, the workflow IR and `block/v1`; most blocks wrap
+   microservices that already exist, so the catalog starts full rather than
+   empty. The section closes on scale and failure: the edit path and the run
+   path scale separately, every execution is deduped on
+   `(run_id, node_id, attempt)` so a retry can't pay an invoice twice, and
+   there is no automatic rollback because money that has moved can't be
+   un-moved.
 4. **Long-term maintainability** — review is keyed on a workflow's declared
    effects and blast radius, never on whether it was built by dragging or by
-   coding; schema changes are additive-only, forever; and a four-tier
-   certification ladder (`uncertified -> community -> verified -> core`)
-   governs who else can *find* a published block without ever gating who
-   can build one.
+   coding; a workflow runs as its own principal, so blocks never hold
+   credentials and an over-scoped block fails in the patch validator at edit
+   time rather than at 3am; schema changes are additive-only, forever; block
+   lifecycle belongs to the platform rather than the author (a security fix
+   moves the pin unasked, an orphaned block keeps running but stops being
+   discoverable); and a four-tier certification ladder
+   (`uncertified -> community -> verified -> core`) governs who else can
+   *find* a published block without ever gating who can build one.
 
 It closes with a short, honest **"What this doesn't solve"** section (encapsulated
 code staying unreadable by design, no CRDT-level co-editing of a single node,

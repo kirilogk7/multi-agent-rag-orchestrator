@@ -39,6 +39,14 @@ document, not four products. None of them can see state the others can't,
 and none of them saves by overwriting the whole file — more on why that
 matters in Section 3.
 
+## 1. Architecture design
+
+**One canonical IR; every surface is a projection over it.** A workflow is a
+single document — typed nodes and edges, plus a UI-annotation layer the
+canvas owns and the code editor never touches. The canvas renders it as
+boxes, the code editor renders it as text, a wizard renders a filtered
+subset of it as a form. None of them is the "real" version; the document is.
+
 **Interface connections.** Every surface — including the API — talks to the
 IR through the same patch endpoint; there is no separate "canvas service"
 and "code service" with their own state to keep in sync. This is also the
@@ -48,14 +56,6 @@ document model the canvas uses, so a power user can create or edit a
 workflow by script, CI pipeline, or CLI, and see the result on the canvas
 immediately — because it's the same file, reached through the same patch
 contract, not a parallel one.
-
-## 1. Architecture design
-
-**One canonical IR; every surface is a projection over it.** A workflow is a
-single document — typed nodes and edges, plus a UI-annotation layer the
-canvas owns and the code editor never touches. The canvas renders it as
-boxes, the code editor renders it as text, a wizard renders a filtered
-subset of it as a form. None of them is the "real" version; the document is.
 
 **Control flow is declarative; custom logic is encapsulated, never inlined.**
 Arbitrary code cannot be drawn as a flowchart, so this design doesn't pretend
@@ -233,17 +233,91 @@ platform team builds one the same way for a built-in action. There's no
 separate "plugin SDK" — publishing a block *is* the extension model, for
 internal authors and the platform itself alike.
 
+**Most blocks are existing microservices, not new code.** The scenario
+starts from a service estate that already exists, and the fastest way to
+fill the catalog is to wrap it: a block is a typed envelope over an
+endpoint — ports mapped to request and response fields, effects declared
+by the owning team, credentials handled by the platform rather than the
+block. Importing an OpenAPI spec drafts one block per operation, landing
+as `uncertified` and owned by whoever imported it, exactly like any other
+block. This matters more for adoption than for architecture: a catalog
+that starts empty gets used by nobody, and "publish as block" only
+becomes a flywheel once there is something there to compose against.
+
+A block definition is the second document type, and the only other one a
+user ever authors:
+
+```yaml
+schema: block/v1
+id: calculate-tax
+version: 2.1             # workflows pin the major; 2.x stays compatible
+owner: team:finance-eng  # a team, never a person -- see Section 4
+tier: verified
+
+ports:
+  in:  { amount: money, region: string }
+  out: { tax: money, breakdown: json }
+
+effects:                 # what governance reads -- see Section 4
+  network: [tax-api.internal]
+  writes:  []            # pure apart from the call
+  cost:    EUR 0.004/run
+
+impl:
+  kind: service          # or `inline` for code written in the editor
+  endpoint: POST https://tax-api.internal/v2/calculate
+  identity: workflow     # the workflow's principal, not the caller's
+```
+
 **Execution is boring on purpose.** A durable scheduler runs the DAG,
 retries failed nodes with backoff, and logs every step so a run can be
 replayed. None of this is novel — it's standard workflow-engine practice —
 and that's deliberate: the interesting problem here is the shared document
 and the escalation ladder, not inventing a new execution model.
 
+**What this has to hold, and what happens when it doesn't.** Numbers
+first, because "it scales" is not a design. The shape this targets is
+~10k workflows, ~50k runs/day with a ~10x month-end peak, and tens of
+concurrent editors — not thousands, because authoring is a human activity
+and the edit path is never the hot path. The two loads want opposite
+things, so they are scaled separately:
+
+| | Edit path | Run path |
+|---|---|---|
+| Load | tens of concurrent authors | 50k runs/day, bursty |
+| Scales by | one store, read replicas | partition queue by workflow id |
+| Bottleneck | patch validation (cheap) | block execution (the real work) |
+
+The IR store stays a single consistent document store: workflow documents
+are kilobytes and edits are rare, so there is nothing to gain by sharding
+it and a merge property to lose. The scheduler is the part that scales
+out, and it does so the ordinary way — partition by workflow id, add
+workers.
+
+**Partial failure is the normal case.** A run is a sequence of calls into
+other teams' services, so some of them will fail halfway. Three rules,
+all deliberately boring:
+
+- Every execution is keyed by `(run_id, node_id, attempt)` and deduped on
+  that key, so a retry after a timeout cannot pay an invoice twice.
+- A block that is not safely retryable declares `at_most_once`; the
+  scheduler then stops the run and waits for a human rather than guess.
+- There is no automatic rollback, because money that has moved cannot be
+  un-moved. Compensation is a step the author draws on the canvas, not a
+  platform feature that pretends otherwise.
+
+**What a business user sees when it breaks** is the run log drawn on the
+canvas they already know: the failed node marked, its inputs and the
+error beside it, every upstream output still inspectable, and one button
+to resume from that node once the cause is fixed. No stack trace, and no
+re-running the whole workflow to find out whether it worked this time.
+
 ## 4. Long-term maintainability
 
 **Review is keyed on blast radius and declared effects, never on how a
-workflow was built.** This is the point the brief's framing misses most
-directly: "drag-and-drop" and "needs no review" are not the same axis.
+workflow was built.** This is where the simplicity-versus-power framing
+does the most damage: "drag-and-drop" and "needs no review" are not the
+same axis.
 
 | Built by | Low blast radius (e.g. renames a file) | High blast radius (e.g. moves money) |
 |---|---|---|
@@ -257,6 +331,19 @@ built. Governance reads the *effects* a workflow declares, not its
 authorship method — which also means a business user is never blocked from
 shipping something safe just because the platform can't tell how it was
 made.
+
+**Effects say what a workflow may do; identity says who it does it as.**
+The table above is only enforceable if the platform knows what a run is
+allowed to touch, so a workflow executes as its own principal —
+`workflow:wf_invoice_approval`, owned by `team:finance-ops` — and never
+as whoever clicked Run. A business user triggering a payment run does not
+borrow an engineer's access, and an engineer testing it does not borrow
+theirs. Blocks never hold credentials at all: a block declares
+`network: [tax-api.internal]`, and the platform injects a scoped,
+short-lived token for that host at call time. Dragging a block whose
+declared effects exceed the workflow's granted scope fails in the patch
+validator, at edit time, on the canvas, naming the missing permission —
+rather than at 3am on the first real run.
 
 **Adding capabilities is the flywheel from Section 2, not a separate
 process.** Every "publish as block" event adds a capability to the platform
@@ -280,6 +367,27 @@ delete data a new client wrote. A `workflow/v1 -> v2` change ships with a
 migration function the platform owns and runs automatically — not homework
 assigned to every workflow's author, most of whom will have moved teams by
 the time it matters.
+
+**Blocks outlive the people who wrote them, so their lifecycle is the
+platform's job, not the author's.** Pinning `calculate-tax@2.1` is what
+stops an upstream change from silently altering a finance workflow — but
+a pin nobody ever moves is just a slow leak. Three cases the platform
+owns because the workflow's author cannot:
+
+- **A new major ships.** The old one keeps working. Workflows still on it
+  are listed on the block's page and their owners get one notification,
+  not a deadline — nothing breaks on the platform's schedule.
+- **A security fix ships.** The platform moves the pin within the major
+  version without asking, because `2.1 -> 2.2` is compatible by
+  definition, and tells the owners afterwards.
+- **The owning team dissolves.** Ownership is on a team and never a
+  person, for exactly this reason. An orphaned block keeps running
+  everywhere it is already used and drops to `uncertified`, so it stops
+  being discoverable for new work until someone adopts it.
+
+The asymmetry is deliberate: a block is easy to publish and hard to
+delete. A stale block in the catalog costs a bad search result; a deleted
+one costs a broken payment run.
 
 **The one metric that tells you if this actually worked: the descent
 rate** — the share of power-user-authored blocks that business users go on
