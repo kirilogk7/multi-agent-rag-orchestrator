@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 71-case test suite in a few more.
+seconds, and the 74-case test suite in a few more.
 
 ### Demo
 
@@ -387,11 +387,11 @@ capability visibly changes behaviour:
 ```
 
 Files marked **(+)** are additions to the structure given in the assignment. The
-four mandated modules all exist and do their named jobs; these four isolate
-concerns that would otherwise have turned `utils.py` into a dumping ground and
-`orchestrator.py` into a 1,200-line file. `synthesis.py` in particular owns three
-of the four "advanced features", which is enough responsibility to deserve its own
-module.
+five mandated modules all exist and do their named jobs; the four additions
+isolate concerns that would otherwise have turned `utils.py` into a dumping
+ground and `orchestrator.py` into a 1,200-line file. `synthesis.py` in particular
+owns two of the four "advanced features" — conflict resolution and citation
+tracking — which is enough responsibility to deserve its own module.
 
 ### The synthetic corpus
 
