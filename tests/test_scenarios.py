@@ -10,6 +10,7 @@ Everything runs offline against the bundled synthetic corpus in a few seconds.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import replace
@@ -27,6 +28,7 @@ from rag_system.synthesis import (
     ClaimExtractor,
     ClaudeSynthesizer,
     ConflictResolver,
+    _describe_exception,
 )
 from rag_system.utils import Document, load_corpus
 from rag_system.vector_store import KnowledgeBase, RetrievalParams
@@ -928,6 +930,62 @@ def test_claude_keeps_the_overruled_claim_traceable(
             assert (claim.doc_id, claim.char_start, claim.char_end) in spans, (
                 f"{claim.document.citation_label} lost its citation; an overruled "
                 f"claim must stay as traceable as an adopted one")
+
+
+def test_fallback_warning_names_the_underlying_cause(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A fallback must say what broke, not just that something did.
+
+    The SDK collapses every transport-layer failure into
+    ``APIConnectionError("Connection error.")``. A stale Brotli build whose
+    decompressor rejects a keyword argument the HTTP client passes reports
+    identically to an unreachable network -- but it is a *successful* request
+    that failed while decoding the reply, and the fixes have nothing in common.
+    """
+    class _ChainedFailureClient(_FakeAnthropicClient):
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            try:
+                raise TypeError("process() takes no keyword arguments")
+            except TypeError as root:
+                raise RuntimeError("Connection error.") from root
+
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(_ChainedFailureClient(), monkeypatch))
+
+    with caplog.at_level(logging.WARNING, logger="rag_system.synthesis"):
+        answer = orchestrator.answer("How long are logs containing personal data retained?")
+
+    assert answer.synthesizer == "extractive"
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Connection error." in logged
+    assert "process() takes no keyword arguments" in logged, (
+        f"the root cause was swallowed: {logged}")
+
+
+def test_describe_exception_renders_the_chain_without_looping() -> None:
+    """Self-referential chains must terminate, and repeats must not be echoed."""
+    try:
+        try:
+            raise ValueError("root")
+        except ValueError as root:
+            raise RuntimeError("wrapper") from root
+    except RuntimeError as exc:
+        rendered = _describe_exception(exc)
+
+    assert rendered == "RuntimeError: wrapper <- caused by ValueError: root"
+
+    # A re-raise of the identical message should not be repeated.
+    try:
+        try:
+            raise ValueError("same")
+        except ValueError as root:
+            raise ValueError("same") from root
+    except ValueError as exc:
+        assert _describe_exception(exc) == "ValueError: same"
+
+    assert _describe_exception(ValueError("alone")) == "ValueError: alone"
 
 
 def test_claude_prompt_supplies_every_marker_it_permits(

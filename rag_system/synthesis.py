@@ -47,6 +47,32 @@ from .utils import (
 LOGGER = get_logger(__name__)
 
 
+def _describe_exception(exc: BaseException, *, max_depth: int = 4) -> str:
+    """Render an exception together with the chain that caused it.
+
+    The SDK maps any transport-layer failure to ``APIConnectionError("Connection
+    error.")``, which names neither the cause nor even the layer it happened in.
+    A stale Brotli build whose ``Decompressor.process`` rejects the keyword
+    argument the HTTP client passes reports identically to an unreachable
+    network, a wrong base URL and a DNS failure -- and the first of those is a
+    successful request that failed while *decoding* the reply. Unwrapping the
+    chain costs one line here and is the difference between a diagnosis and a
+    guess.
+    """
+    parts = [f"{type(exc).__name__}: {exc}"]
+    seen = {id(exc)}
+    current: Optional[BaseException] = exc
+    while len(parts) <= max_depth:
+        current = (current.__cause__ or current.__context__) if current else None
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        rendered = f"{type(current).__name__}: {current}"
+        if rendered != parts[-1]:          # the SDK often re-raises verbatim
+            parts.append(rendered)
+    return " <- caused by ".join(parts)
+
+
 def version_key(version: str) -> Tuple[int, ...]:
     """Sort key ordering dotted version strings numerically.
 
@@ -1272,8 +1298,8 @@ class ClaudeSynthesizer(Synthesizer):
             # Broad on purpose: every API failure mode (auth, rate limit, 5xx,
             # timeout, connection) has the same correct response here, which is
             # to serve the deterministic answer instead of raising into a demo.
-            LOGGER.warning("Claude synthesis failed (%s: %s); using %s",
-                           type(exc).__name__, exc, self.fallback.name)
+            LOGGER.warning("Claude synthesis failed (%s); using %s",
+                           _describe_exception(exc), self.fallback.name)
             return baseline
 
     @staticmethod

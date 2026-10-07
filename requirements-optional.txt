@@ -9,3 +9,14 @@ sentence-transformers>=2.2
 # Also requires ANTHROPIC_API_KEY; without it the system silently keeps using the
 # deterministic extractive synthesizer.
 anthropic>=1.0
+
+# Not a dependency of this project, and not installed here on purpose -- but if
+# your environment already has `Brotli` below 1.2.0 (common on prebuilt container
+# images), upgrade it:  pip install -U "Brotli>=1.2.0"
+#
+# The SDK ships its own vendored HTTP client, whose brotli decoder calls
+# `Decompressor.process(data, output_buffer_limit=...)`. Builds before 1.2.0
+# reject that keyword, so a response that arrived perfectly well fails while
+# being decoded -- surfacing as `APIConnectionError: Connection error.`, which
+# points at the network rather than at the real cause. With Brotli absent
+# entirely nothing breaks: the client simply never advertises `br`.
