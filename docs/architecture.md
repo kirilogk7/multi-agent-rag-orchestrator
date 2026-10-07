@@ -390,38 +390,41 @@ routed to means a cue-lexicon problem. The aggregate number hides all three.
   +-- authority_weight, effective
                     | 1:N
                     v
+  +------------------------+
+  |         Chunk          |
+  |chunk_id, doc_id, domain|
+  |char_start, char_end    |
+  |ordinal                 |
+  +------------------------+
+               | retrieved as
+               v
   +---------------+
-  |     Chunk     |
+  |RetrievedChunk |
   |score (RRF)    |
   |relevance [0,1]|
   |dense/lexical  |
   |+ ranks        |
   +---------------+
   +-- describe()
-          | retrieved as
+          | extract() -- 1:N
           v
-  +--------------+
-  |RetrievedChunk|
-  |char span     |
-  |confidence    |
-  |polarity      |
-  |measurements  |
-  +--------------+
-  +-- components
-          | 1:N
-          v
-  +-----+
-  |Claim|
-  +-----+
-     |
-  +---------------+
-  v pairs         | kept
-  +--------+      |
-  |Conflict|      |
-  +--------+      |
-       |          |
-       +----+-----+
-            v
+  +------------------------+
+  |         Claim          |
+  |char span, confidence   |
+  |salience, polarity      |
+  |measurements, components|
+  +------------------------+
+               |
+  +-------------------+
+  v pairs             | kept
+  +-------------+     |
+  |  Conflict   |     |
+  |winner, loser|     |
+  |margin, basis|     |
+  +-------------+     |
+         |            |
+         +-----+------+
+               v
   +-----------------+
   |     Answer      |
   |confidence, notes|
