@@ -28,11 +28,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Type-check (mypy)
+        run: python -m mypy
+
       - name: Run tests
         run: python -m pytest tests/ -q
 
       - name: Run module doctests
-        run: python -m doctest rag_system/protocol.py rag_system/utils.py -v | tail -1
+        run: python -m pytest --doctest-modules rag_system/ -q
 
       - name: Smoke-test the CLI
         run: python -m rag_system --demo

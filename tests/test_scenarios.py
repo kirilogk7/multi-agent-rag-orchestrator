@@ -10,8 +10,11 @@ Everything runs offline against the bundled synthetic corpus in a few seconds.
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import replace
-from typing import List, Sequence, Set
+from types import SimpleNamespace
+from typing import ClassVar, List, Sequence, Set
 
 import pytest
 
@@ -19,7 +22,7 @@ from rag_system.domain_agents import DomainAgent
 from rag_system.orchestrator import RAGOrchestrator
 from rag_system.protocol import MessageType
 from rag_system.query_classifier import QueryIntent
-from rag_system.synthesis import ClaimExtractor, ConflictResolver
+from rag_system.synthesis import ClaimExtractor, ClaudeSynthesizer, ConflictResolver
 from rag_system.utils import Document, load_corpus
 from rag_system.vector_store import KnowledgeBase, RetrievalParams
 
@@ -358,6 +361,39 @@ def test_polarity_conflict_detected(knowledge_base: KnowledgeBase) -> None:
     assert polarity[0].winner.domain == "compliance"
 
 
+def test_conflict_subject_tokens_are_totally_ordered(
+    knowledge_base: KnowledgeBase
+) -> None:
+    """Rendered conflict labels must not depend on set-iteration order.
+
+    Regression test. The polarity detector chose its subject tokens with
+    ``sorted(..., key=len, reverse=True)``, which is not a total order over a
+    set: equal-length tokens came out in whatever order the set happened to
+    yield, so one conflict rendered as "verbose", "payload" or "request"
+    depending on ``PYTHONHASHSEED`` -- against a documented promise of
+    byte-identical output.
+
+    The instability is in *which* tokens are selected, not how the selected ones
+    are ordered: "payload", "request" and "verbose" are all seven characters, so
+    length alone cannot choose between them for the last of the three slots.
+    Pinning the exact expected tokens is therefore the assertion that bites --
+    comparing repeated runs in one interpreter would not, because a set's
+    iteration order is fixed for the life of the process.
+    """
+    claims = _claims_for(
+        knowledge_base,
+        "Can I enable verbose request tracing in production to debug latency?",
+        ("technical", "compliance"))
+    polarity = [c for c in ConflictResolver().detect(claims) if c.kind == "polarity"]
+    assert polarity, "the planted verbose-tracing conflict was not detected"
+
+    # subject reads: "permitted vs prohibited -- a, b, c (overlap 0.21)"
+    listed = polarity[0].subject.split("--", 1)[1].rsplit("(", 1)[0]
+    tokens = [t.strip() for t in listed.split(",")]
+    assert tokens == ["authentication", "response", "payload"], (
+        f"subject tokens are not deterministic across hash seeds: {tokens}")
+
+
 def test_polarity_conflict_is_reachable_end_to_end(
     orchestrator: RAGOrchestrator
 ) -> None:
@@ -531,7 +567,7 @@ def test_citation_verification_catches_a_corrupted_span(
     answer = orchestrator.answer("What is our log retention period?")
     assert answer.citations
     broken = replace(answer.citations[0], char_start=0, char_end=5)
-    answer.citations = (broken,) + answer.citations[1:]
+    answer.citations = (broken, *answer.citations[1:])
 
     audit = orchestrator.verify(answer)
     assert any(not record["ok"] for record in audit)
@@ -636,6 +672,207 @@ def test_very_long_query_is_handled(orchestrator: RAGOrchestrator) -> None:
 def test_non_ascii_query_is_handled(orchestrator: RAGOrchestrator) -> None:
     answer = orchestrator.answer("Quelles approbations sont requises — déploiement?")
     assert answer.text  # may abstain; must not raise
+
+
+class _SlowAgent(DomainAgent):
+    """A domain agent that blocks until the test releases it.
+
+    Two events rather than a bare ``sleep``, so the test owns the worker's whole
+    lifetime. The orchestrator abandons a timed-out worker by design -- that is
+    the behaviour under test -- but a test that returns while its worker is still
+    running leaves a thread touching a knowledge base the *next* test has already
+    replaced. ``released`` lets it finish and ``finished`` lets the test join it.
+    """
+
+    released: ClassVar[threading.Event] = threading.Event()
+    finished: ClassVar[threading.Event] = threading.Event()
+
+    def _retrieve(self, query, params):  # type: ignore[no-untyped-def]
+        self.released.wait(timeout=30.0)
+        return []
+
+    def handle(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # ``finished`` is set here, not in ``_retrieve``: the worker still has to
+        # unwind through claim extraction and the protocol message after
+        # retrieval returns, and a test that joined on ``_retrieve`` alone would
+        # return while its thread was still running.
+        try:
+            return super().handle(*args, **kwargs)
+        finally:
+            self.finished.set()
+
+
+def test_a_hung_supporting_agent_does_not_hang_the_query() -> None:
+    """``agent_timeout`` must be a real deadline, not a documented intention.
+
+    Regression test. The timeout used to be passed to ``future.result()`` inside
+    an ``as_completed`` loop, but ``as_completed`` only yields futures that have
+    *already* finished -- so the deadline could never elapse and one hung agent
+    stalled the whole query indefinitely.
+    """
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(kb, agent_timeout=0.5)
+    _SlowAgent.released.clear()
+    _SlowAgent.finished.clear()
+    orchestrator.agents["compliance"] = _SlowAgent(
+        "compliance", kb, bus=orchestrator.bus, blackboard=orchestrator.blackboard)
+
+    try:
+        started = time.perf_counter()
+        answer = orchestrator.answer(
+            "What's the process for deploying a new microservice and what compliance "
+            "checks are needed?")
+        elapsed = time.perf_counter() - started
+    finally:
+        _SlowAgent.released.set()
+        # Join the abandoned worker before leaving the test, so it cannot run on
+        # into the next one.
+        assert _SlowAgent.finished.wait(timeout=10.0), "the slow agent never finished"
+
+    assert elapsed < 10.0, f"query took {elapsed:.1f}s; the deadline did not fire"
+    assert answer.degraded, "a timed-out agent must degrade the answer"
+    assert not answer.abstained
+    assert any("compliance" in note and "failed" in note for note in answer.notes)
+    assert MessageType.FAILURE in {
+        m.type for m in orchestrator.bus.trace(answer.trace_id)}
+
+
+# --------------------------------------------------------------------------- #
+# Optional generative synthesis
+# --------------------------------------------------------------------------- #
+
+class _FakeAnthropicClient:
+    """Stands in for ``anthropic.Anthropic``, enforcing the real call signature.
+
+    The point is ``ALLOWED``. ``client.messages.create`` is a typed method, not a
+    ``**kwargs`` passthrough, so handing it an argument that only exists on
+    ``client.beta.messages.create`` raises ``TypeError`` before any request is
+    sent -- and ``ClaudeSynthesizer`` catches every exception in order to fall
+    back, which turned that mistake into a silent no-op rather than a failure.
+    This fake reproduces the rejection so the mistake is a red test instead.
+    """
+
+    ALLOWED: ClassVar[Set[str]] = {"model", "max_tokens", "system", "messages"}
+
+    def __init__(self, text: str = "Synthesised prose [1].") -> None:
+        self.text = text
+        self.calls: List[dict] = []
+
+    @property
+    def messages(self) -> "_FakeAnthropicClient":
+        return self
+
+    def create(self, **kwargs: object) -> SimpleNamespace:
+        unexpected = sorted(set(kwargs) - self.ALLOWED)
+        if unexpected:
+            raise TypeError(
+                f"Messages.create() got an unexpected keyword argument "
+                f"{unexpected[0]!r}")
+        self.calls.append(dict(kwargs))
+        block = SimpleNamespace(type="text", text=self.text)
+        return SimpleNamespace(content=[block], stop_reason="end_turn")
+
+
+def _claude_synthesizer(client: object, monkeypatch: pytest.MonkeyPatch) -> ClaudeSynthesizer:
+    synthesizer = ClaudeSynthesizer()
+    monkeypatch.setattr(ClaudeSynthesizer, "available", staticmethod(lambda: True))
+    monkeypatch.setattr(synthesizer, "_ensure_client", lambda: client)
+    return synthesizer
+
+
+def test_claude_synthesis_calls_the_api_with_supported_arguments(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The generative path must actually reach the API, not fall back silently."""
+    kb = KnowledgeBase(load_corpus())
+    client = _FakeAnthropicClient()
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(client, monkeypatch))
+
+    answer = orchestrator.answer(
+        "What's the process for deploying a new microservice and what compliance "
+        "checks are needed?")
+
+    assert client.calls, "the API was never called -- the generative path fell back"
+    assert answer.synthesizer.startswith("claude:")
+    assert "Synthesised prose [1]." in answer.text
+    # Citations and the source list stay ours, not the model's.
+    assert answer.text.rstrip().count("Sources") == 1
+    assert answer.citations
+
+
+def test_claude_synthesis_falls_back_on_any_api_failure(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken API must cost prose quality, never the answer."""
+    class _ExplodingClient(_FakeAnthropicClient):
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            raise RuntimeError("503 upstream unavailable")
+
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(_ExplodingClient(), monkeypatch))
+
+    answer = orchestrator.answer("How long are logs containing personal data retained?")
+
+    assert answer.synthesizer == "extractive"
+    assert answer.citations
+    assert not answer.abstained
+
+
+def test_claude_synthesis_falls_back_on_a_refusal(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused generation is a fallback, not an empty answer."""
+    class _RefusingClient(_FakeAnthropicClient):
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            super().create(**kwargs)
+            return SimpleNamespace(content=[], stop_reason="refusal")
+
+    kb = KnowledgeBase(load_corpus())
+    client = _RefusingClient()
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(client, monkeypatch))
+
+    answer = orchestrator.answer("How long are logs containing personal data retained?")
+
+    assert client.calls, "the refusal path must still have reached the API"
+    assert answer.synthesizer == "extractive"
+    assert answer.citations
+    assert not answer.abstained
+
+
+def test_claude_prompt_supplies_every_marker_it_permits(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prompt forbids citing unsupplied markers, so it must supply them all."""
+    kb = KnowledgeBase(load_corpus())
+    client = _FakeAnthropicClient()
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(client, monkeypatch))
+    orchestrator.answer(
+        "What's the process for deploying a new microservice and what compliance "
+        "checks are needed?")
+
+    prompt = client.calls[0]["messages"][0]["content"]  # type: ignore[index]
+    assert "Findings:" in prompt
+    assert "[1]" in prompt
+    assert "Do not include a Sources list" in prompt
+
+
+def test_zero_trust_agent_yields_zero_confidence_not_a_crash() -> None:
+    """An agent trusted at zero scales every claim to zero confidence.
+
+    Claims still exist, so the abstention branch does not catch it, and the
+    confidence-weighted mean used to divide by a zero total.
+    """
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(kb)
+    for agent in orchestrator.agents.values():
+        agent.trust_weight = 0.0
+
+    answer = orchestrator.answer("How long are logs containing personal data retained?")
+    assert answer.confidence == 0.0
 
 
 # --------------------------------------------------------------------------- #

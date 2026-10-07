@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "jupyter>=1.0", "matplotlib>=3.7"]
+dev = ["pytest>=7.4", "jupyter>=1.0", "matplotlib>=3.7", "ruff>=0.6", "mypy>=1.11"]
 embeddings = ["sentence-transformers>=2.2"]
 claude = ["anthropic>=1.0"]
 
@@ -26,3 +26,40 @@ rag_system = []
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["error::DeprecationWarning:rag_system.*"]
+
+[tool.ruff]
+# 100 rather than the default 88: the codebase wraps at 100 and the docstrings
+# are prose, not annotations. Pinned here so `ruff check .` means the same thing
+# on any machine -- unconfigured, ruff's defaults flag 370+ purely stylistic
+# findings (mostly `typing.Dict` over `dict`, which is a consistent deliberate
+# choice here) and the tool stops being usable as a gate.
+line-length = 100
+target-version = "py310"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "C4", "SIM", "RUF", "BLE"]
+ignore = [
+    "RUF001",  # ambiguous unicode in prose docstrings (en dashes, arrows)
+    "RUF002",
+    "RUF003",
+    "RUF022",  # __all__ is grouped and wrapped for reading, not one-per-line
+    "SIM103",  # explicit guard clauses read better than one negated boolean
+    "SIM108",  # ternary-over-if-else hurts readability in the scoring code
+    "SIM114",  # merging the supersession and score branches conflates two rules
+    "SIM905",  # the stopword list is a readable block of prose, not a literal
+]
+
+[tool.ruff.lint.per-file-ignores]
+"rag_system/__init__.py" = ["E501"]   # the re-export block is a flat list
+
+[tool.mypy]
+python_version = "3.10"
+files = ["rag_system"]
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# Optional extras, installed only via requirements-optional.txt. Their absence
+# is the normal case, not a type error.
+module = ["anthropic", "sentence_transformers"]
+ignore_missing_imports = true

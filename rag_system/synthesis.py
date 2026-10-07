@@ -46,6 +46,22 @@ from .utils import (
 
 LOGGER = get_logger(__name__)
 
+
+def version_key(version: str) -> Tuple[int, ...]:
+    """Sort key ordering dotted version strings numerically.
+
+    Non-numeric components sort as ``0``, which is enough for the ``major.minor``
+    strings this corpus uses and degrades predictably on anything else.
+
+    >>> sorted(["10.0", "2.0", "1.5"], key=version_key)
+    ['1.5', '2.0', '10.0']
+    """
+    parts = []
+    for component in str(version).split("."):
+        parts.append(int(component) if component.isdigit() else 0)
+    return tuple(parts)
+
+
 #: Anchors too generic to establish that two quantities measure the same thing.
 #:
 #: These are the predicates that sit next to a number in almost every policy
@@ -64,9 +80,6 @@ GENERIC_ANCHORS: frozenset = frozenset({
     "default", "standard", "normal", "typic", "gener", "other",
 })
 
-#: Words that mark a sentence as stating a rule rather than describing context.
-#: A claim-bearing sentence is what conflict detection and citation need; a
-#: scene-setting sentence is noise in both.
 #: Words marking a sentence as describing a *procedure* rather than a rule.
 #:
 #: These exist because rewarding only obligation language biases claim selection
@@ -84,6 +97,9 @@ PROCEDURAL_MARKERS: frozenset = frozenset({
     "ensure", "set", "configure", "apply", "raise", "lower", "increase",
 })
 
+#: Words that mark a sentence as stating a rule rather than describing context.
+#: A claim-bearing sentence is what conflict detection and citation need; a
+#: scene-setting sentence is noise in both.
 OBLIGATION_MARKERS: frozenset = frozenset({
     "must", "required", "require", "requires", "shall", "mandatory", "prohibited",
     "forbidden", "may", "cannot", "need", "needs", "should", "obliged", "expected",
@@ -364,7 +380,10 @@ class Conflict:
         """
         if self.kind == "supersession":
             return True
-        if self.loser.document.status == "superseded" != self.winner.document.status:
+        # Spelled out rather than chained as ``a == "superseded" != b``: that
+        # reads like a typo even though Python evaluates it correctly.
+        if (self.loser.document.status == "superseded"
+                and self.winner.document.status != "superseded"):
             return True
         return self.margin >= 0.08
 
@@ -520,9 +539,12 @@ class ConflictResolver:
         if jaccard(a.tokens, b.tokens) < self.supersession_floor:
             return None
         title = da.title or db.title
+        # Ordered numerically, not lexically: as strings "10.0" sorts before
+        # "2.0", so a corpus that ever reaches a double-digit major version would
+        # report the supersession the wrong way round in the subject line.
+        older, newer = sorted((da.version, db.version), key=version_key)
         return ("supersession",
-                f"{title}: {min(da.version, db.version)} superseded by "
-                f"{max(da.version, db.version)}",
+                f"{title}: {older} superseded by {newer}",
                 "version")
 
     def _numeric(self, a: Claim, b: Claim) -> Optional[Tuple[str, str, str]]:
@@ -570,7 +592,12 @@ class ConflictResolver:
         overlap = jaccard(a.tokens, b.tokens)
         if overlap < self.overlap_threshold:
             return None
-        shared = sorted(set(a.tokens) & set(b.tokens), key=len, reverse=True)[:3]
+        # Longest first, then alphabetically. The alphabetical tiebreak is load
+        # bearing: `key=len` alone is not a total order over a set, so two
+        # equal-length tokens came out in set-iteration order and this label
+        # changed between runs with different PYTHONHASHSEED values.
+        shared = sorted(set(a.tokens) & set(b.tokens),
+                        key=lambda t: (-len(t), t))[:3]
         subject = ", ".join(shared) if shared else "opposing guidance"
         return ("polarity",
                 f"permitted vs prohibited -- {subject} (overlap {overlap:.2f})",
@@ -588,7 +615,8 @@ class ConflictResolver:
         # history is an explicit statement of intent and outranks any heuristic.
         if a.document.status == "superseded" and b.document.status != "superseded":
             winner, loser, score_w, score_l = b, a, score_b, score_a
-        elif b.document.status == "superseded" and a.document.status != "superseded":
+        elif (b.document.status == "superseded"
+                and a.document.status != "superseded"):
             winner, loser, score_w, score_l = a, b, score_a, score_b
         elif score_a >= score_b:
             winner, loser, score_w, score_l = a, b, score_a, score_b
@@ -642,6 +670,24 @@ class ConflictResolver:
 # Citations and answers
 # --------------------------------------------------------------------------- #
 
+#: Bands for turning a confidence score into a word. One definition, because the
+#: answer body and the ``Answer`` object both label the same number and silently
+#: disagreeing about where "high" starts would be worse than either boundary.
+CONFIDENCE_BANDS: Tuple[Tuple[float, str], ...] = ((0.70, "high"), (0.45, "moderate"))
+
+
+def confidence_label(confidence: float) -> str:
+    """Name a confidence score: ``high``, ``moderate`` or ``low``.
+
+    >>> [confidence_label(c) for c in (0.9, 0.5, 0.1)]
+    ['high', 'moderate', 'low']
+    """
+    for floor, label in CONFIDENCE_BANDS:
+        if confidence >= floor:
+            return label
+    return "low"
+
+
 @dataclass(frozen=True)
 class Citation:
     """A numbered reference back to an exact span of a source document."""
@@ -691,11 +737,7 @@ class Answer:
 
     @property
     def confidence_label(self) -> str:
-        if self.confidence >= 0.70:
-            return "high"
-        if self.confidence >= 0.45:
-            return "moderate"
-        return "low"
+        return confidence_label(self.confidence)
 
     def __str__(self) -> str:  # pragma: no cover - presentation only
         return self.text
@@ -769,8 +811,10 @@ class ExtractiveSynthesizer(Synthesizer):
     explicit about. It costs fluency: the output reads as structured findings
     rather than prose. It buys three things that matter more for this brief --
     every sentence in the answer is verbatim from a source document so it cannot
-    hallucinate, the output is byte-identical across runs so the notebook and
-    the tests are reproducible, and it needs no API key or network.
+    hallucinate, the output is byte-identical for a given corpus and date so the
+    notebook and the tests are reproducible, and it needs no API key or network.
+    (The date qualifier is real: recency decay reads ``date.today()``, so claim
+    confidence drifts slowly as the corpus ages.)
 
     ``ClaudeSynthesizer`` is the generative counterpart for when fluency is
     worth the trade.
@@ -1047,7 +1091,14 @@ class ExtractiveSynthesizer(Synthesizer):
         if not claims:
             return 0.0
         weights = [c.confidence for c in claims]
-        base = sum(w * w for w in weights) / sum(weights)  # confidence-weighted mean
+        total = sum(weights)
+        if total <= 0.0:
+            # Reachable: an agent configured with ``trust_weight=0.0`` scales
+            # every claim confidence to zero. Claims still exist, so the
+            # abstention branch above does not catch it, and the weighted mean
+            # below would divide by zero. Zero confidence is the honest answer.
+            return 0.0
+        base = sum(w * w for w in weights) / total  # confidence-weighted mean
 
         corroboration = min(1.0, len({c.doc_id for c in claims}) / 3.0)
         score = 0.82 * base + 0.18 * corroboration
@@ -1062,7 +1113,7 @@ class ExtractiveSynthesizer(Synthesizer):
     def _confidence_section(confidence: float, claims: Sequence[Claim],
                             conflicts: Sequence[Conflict], degraded: bool,
                             notes: Sequence[str]) -> str:
-        label = "high" if confidence >= 0.70 else "moderate" if confidence >= 0.45 else "low"
+        label = confidence_label(confidence)
         parts = [f"{len(claims)} finding(s) from {len({c.doc_id for c in claims})} document(s)"]
         if conflicts:
             decisive = sum(1 for c in conflicts if c.decisive)
@@ -1172,15 +1223,19 @@ class ClaudeSynthesizer(Synthesizer):
 
         try:
             client = self._ensure_client()
+            # Deliberately the stable `messages.create` surface. An earlier
+            # version passed `betas=[...]`/`fallbacks="default"` here to get a
+            # server-side refusal fallback, but those arguments only exist on
+            # `client.beta.messages.create`; on the stable method the SDK raises
+            # TypeError before any request is sent, which the broad except below
+            # then swallowed -- so the generative path silently never ran. The
+            # server-side fallback is redundant anyway: a refusal, an error, or
+            # an empty body all land on the deterministic answer below.
             response = client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=self.SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": self._build_prompt(query, baseline)}],
-                # Route around a safety refusal server-side rather than losing
-                # the answer; harmless on a corpus like this, and free insurance.
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
             )
             if getattr(response, "stop_reason", None) == "refusal":
                 LOGGER.warning("synthesis refused by the model; using %s", self.fallback.name)
@@ -1202,7 +1257,7 @@ class ClaudeSynthesizer(Synthesizer):
                 claims=baseline.claims,
                 conflicts=baseline.conflicts,
                 degraded=degraded,
-                notes=tuple(notes) + (f"prose synthesised by {self.model}",),
+                notes=(*notes, f"prose synthesised by {self.model}"),
                 synthesizer=f"{self.name}:{self.model}",
             )
         except ImportError:
@@ -1218,7 +1273,12 @@ class ClaudeSynthesizer(Synthesizer):
     @staticmethod
     def _build_prompt(query: str, baseline: Answer) -> str:
         lines = [f"User question: {query}", "", "Findings:"]
-        for citation, claim in zip(baseline.citations, baseline.claims):
+        # Not strict, and deliberately so: ``citations`` also covers the
+        # conflict losers quoted in the conflict section, so it is longer than
+        # ``claims``. Truncating to the displayed claims is the intended
+        # pairing -- markers line up because citations are minted over
+        # ``kept + losers``, in that order.
+        for citation, claim in zip(baseline.citations, baseline.claims, strict=False):
             lines.append(
                 f"{citation.marker} ({claim.domain}, {claim.document.authority}, "
                 f"effective {claim.document.effective_date}, confidence "

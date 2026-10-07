@@ -204,7 +204,9 @@ class TfidfSvdBackend(EmbeddingBackend):
         self._idf = (np.log((n_docs + 1.0) / (df_array + 1.0)) + 1.0).astype(np.float32)
 
         matrix = self._tfidf_matrix(tokenised)
-        max_components = max(1, min(self.n_components, min(matrix.shape) - 1 if min(matrix.shape) > 1 else 1))
+        smallest = min(matrix.shape)
+        max_components = max(1, min(self.n_components,
+                                    smallest - 1 if smallest > 1 else 1))
         try:
             _, _, vt = np.linalg.svd(matrix, full_matrices=False)
             self._components = np.ascontiguousarray(vt[:max_components], dtype=np.float32)
@@ -271,7 +273,7 @@ class SentenceTransformerBackend(EmbeddingBackend):
     def fit(self, texts: Sequence[str]) -> "SentenceTransformerBackend":
         """Load the checkpoint. A pretrained encoder has nothing to learn here."""
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore
+            from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover - optional path
             raise ImportError(
                 "SentenceTransformerBackend requires the optional extra: "
@@ -597,7 +599,8 @@ class VectorStore:
                     redundancy = float(np.max(vectors[chosen] @ vectors[i]))
                 elif chosen:
                     redundancy = max(
-                        len(set(tokenize(results[i].chunk.text)) & set(tokenize(results[j].chunk.text)))
+                        len(set(tokenize(results[i].chunk.text))
+                            & set(tokenize(results[j].chunk.text)))
                         / max(1, len(set(tokenize(results[i].chunk.text))))
                         for j in chosen
                     )

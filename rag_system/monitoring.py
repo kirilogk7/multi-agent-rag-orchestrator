@@ -151,7 +151,7 @@ class MetricsRegistry:
 
         answered = [r for r in records if not r.abstained]
         labelled = [r for r in records if r.expected_domains]
-        rated = [r for r in records if r.feedback is not None]
+        ratings = [r.feedback for r in records if r.feedback is not None]
         latencies = [r.total_ms for r in records]
 
         stage_totals: Dict[str, List[float]] = defaultdict(list)
@@ -183,9 +183,8 @@ class MetricsRegistry:
             "conflicts_unresolved": sum(r.unresolved_conflicts for r in records),
             "routing": self._routing_summary(labelled),
             "feedback": {
-                "rated_queries": len(rated),
-                "mean_rating": round(statistics.fmean([r.feedback for r in rated]), 4)
-                if rated else None,
+                "rated_queries": len(ratings),
+                "mean_rating": round(statistics.fmean(ratings), 4) if ratings else None,
             },
             "per_domain": self.per_domain(),
         }
@@ -242,7 +241,7 @@ class MetricsRegistry:
             return 0.0
         ordered = sorted(values)
         index = min(len(ordered) - 1,
-                    max(0, int(round((percentile / 100.0) * len(ordered) + 0.5)) - 1))
+                    max(0, round((percentile / 100.0) * len(ordered) + 0.5) - 1))
         return ordered[index]
 
     # -- presentation ----------------------------------------------------- #

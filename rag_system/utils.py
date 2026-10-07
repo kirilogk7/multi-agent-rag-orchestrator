@@ -117,9 +117,6 @@ UNIT_FAMILIES: Dict[str, Tuple[str, float]] = {
 
 _WORD_RE = re.compile(r"[a-z0-9]+(?:[-'][a-z0-9]+)*")
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(])")
-_NUMBER_RE = re.compile(
-    r"\b(\d[\d,]*(?:\.\d+)?|" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True)) + r")\b"
-)
 
 
 # --------------------------------------------------------------------------- #
@@ -169,7 +166,7 @@ class Document:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Document":
         """Build a ``Document`` from a corpus record, ignoring unknown keys."""
-        known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        known = set(cls.__dataclass_fields__)
         data = {k: v for k, v in payload.items() if k in known}
         missing = {"doc_id", "domain", "title", "text"} - data.keys()
         if missing:
@@ -381,22 +378,10 @@ def chunk_document(
         buffer.append((sent, start, end))
         size += length
 
-    # Final flush; suppress a trailing chunk that is pure overlap of the last one.
+    # Final flush; suppress a trailing chunk that is pure overlap of the last one,
+    # which would otherwise duplicate text already emitted with no new content.
     if buffer and not (chunks and len(buffer) <= overlap_sentences):
-        tail_only = buffer
-        buffer = tail_only
-        text = " ".join(s for s, _, _ in buffer)
-        chunks.append(
-            Chunk(
-                chunk_id=f"{doc.doc_id}#{ordinal}",
-                doc_id=doc.doc_id,
-                domain=doc.domain,
-                text=text,
-                char_start=buffer[0][1],
-                char_end=buffer[-1][2],
-                ordinal=ordinal,
-            )
-        )
+        flush()
     return chunks
 
 
@@ -597,13 +582,14 @@ def reciprocal_rank_fusion(
         raise ValueError("weights and rankings must be the same length")
 
     fused: Dict[str, float] = {}
-    for ranking, weight in zip(rankings, weights):
+    for ranking, weight in zip(rankings, weights, strict=True):
         for position, item_id in enumerate(ranking):
             fused[item_id] = fused.get(item_id, 0.0) + weight / (k + position + 1)
     return fused
 
 
-def recency_weight(effective: date, *, now: Optional[date] = None, half_life_days: float = 540.0) -> float:
+def recency_weight(effective: date, *, now: Optional[date] = None,
+                   half_life_days: float = 540.0) -> float:
     """Exponential recency decay in ``(0, 1]``.
 
     Used so that a newer document outranks an older one of equal authority.
@@ -645,7 +631,8 @@ def load_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
                 raise ValueError(f"{path}:{lineno}: invalid JSON -- {exc}") from exc
 
 
-def load_corpus(data_dir: Optional[Path] = None, domains: Sequence[str] = DOMAINS) -> List[Document]:
+def load_corpus(data_dir: Optional[Path] = None,
+                domains: Sequence[str] = DOMAINS) -> List[Document]:
     """Load the synthetic corpus for the requested domains.
 
     Args:
@@ -692,9 +679,10 @@ class Stopwatch:
         self._start = time.perf_counter()
         return self
 
-    def __exit__(self, *exc: Any) -> bool:
+    def __exit__(self, *exc: Any) -> None:
+        # Returns None rather than False: a bool return type tells a reader (and
+        # a type checker) the manager might swallow exceptions, which it must not.
         self.elapsed_ms = (time.perf_counter() - self._start) * 1000.0
-        return False
 
 
 def get_logger(name: str = "rag_system", level: int = logging.INFO) -> logging.Logger:

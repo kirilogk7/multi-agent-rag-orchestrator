@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 51-test suite in a few more.
+seconds, and the 65-case test suite in a few more.
 
 ### Demo
 
@@ -45,7 +45,7 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 51 tests, 2-10s
+python -m pytest tests/ -q                 # 65 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
@@ -238,8 +238,8 @@ margin is thin.
 This is a regulated-environment default, not a convenience shortcut. The
 extractive path makes every sentence in the answer verbatim from a source
 document — so it cannot hallucinate a figure or an obligation that doesn't
-exist in the corpus, output is byte-identical and therefore reconstructible
-for audit, and the system keeps answering if a vendor API is unreachable,
+exist in the corpus, output is byte-identical for a given corpus and date and
+therefore reconstructible for audit, and the system keeps answering if a vendor API is unreachable,
 rate-limited, or simply not approved for this workload yet. *Cost:* it reads
 as structured findings rather than prose.
 
@@ -338,22 +338,22 @@ capability visibly changes behaviour:
 ├── rag_system/
 │   ├── __init__.py
 │   ├── orchestrator.py           # planning, two-phase execution, feedback
-│   ├── query_classifier.py       # routing, intent, complexity, decomposition, retrieval policy
-│   ├── domain_agents.py          # per-domain agents, cross-agent context sharing
-│   ├── vector_store.py           # embedding backends, BM25, hybrid retrieval, knowledge base
-│   ├── utils.py                  # data models, text processing, scoring helpers
+│   ├── query_classifier.py       # routing, intent, complexity, decomposition
+│   ├── domain_agents.py          # per-domain agents, context sharing
+│   ├── vector_store.py           # embedding backends, BM25, hybrid retrieval
+│   ├── utils.py                  # data models, text processing, scoring
 │   ├── protocol.py               # (+) message bus and blackboard
-│   ├── synthesis.py              # (+) claims, conflicts, citations, synthesisers
+│   ├── synthesis.py              # (+) claims, conflicts, citations
 │   ├── monitoring.py             # (+) metrics registry
 │   └── __main__.py               # (+) CLI entry point
-├── data/synthetic/               # 49 documents across 3 domains + an update fixture
-│   └── README.md                 # provenance, record schema, planted conflicts
+├── data/synthetic/               # 49 documents, 3 domains + update fixture
+│   └── README.md                 # provenance, schema, planted conflicts
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 51 tests
+├── tests/test_scenarios.py       # 57 tests, 65 cases
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
-└── .github/workflows/ci.yml      # pytest on 3.10–3.12, CLI smoke test, notebook execution
+└── .github/workflows/ci.yml      # tests, lint, CLI and notebook on 3.10–3.12
 ```
 
 Files marked **(+)** are additions to the structure given in the assignment. The
@@ -389,19 +389,29 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q          # 51 tests
-python -m doctest rag_system/protocol.py rag_system/utils.py
+python -m pytest tests/ -q                      # 65 tests
+python -m pytest --doctest-modules rag_system/  # worked examples in docstrings
+python -m ruff check .                          # config in pyproject.toml
+python -m mypy
 ```
 
-Coverage is weighted towards the failure modes rather than the happy path: the
-suite asserts that out-of-domain queries abstain, that a crashed agent degrades
-rather than aborts, that degradation *lowers* reported confidence, that learned
-weights stay bounded under 80 rounds of hostile feedback, that superseded
-documents are excluded by default but retained for audit, that duplicate
-ingestion is idempotent, and that the citation verifier can fail.
+Coverage is 85% of statements, weighted towards the failure modes rather than the
+happy path: the suite asserts that out-of-domain queries abstain, that a crashed
+agent degrades rather than aborts, that a *hung* agent is abandoned on a deadline
+instead of stalling the query, that degradation *lowers* reported confidence, that
+learned weights stay bounded under 80 rounds of hostile feedback, that superseded
+documents are excluded by default but retained for audit, that duplicate ingestion
+is idempotent, that rendered conflict labels do not depend on hash ordering, and
+that the citation verifier can fail.
 
-CI runs the suite on Python 3.10, 3.11 and 3.12, smoke-tests the CLI, and executes
-the notebook end to end — so a change that breaks the demo fails the build.
+The optional generative path is tested too, against a stand-in client that
+enforces the real SDK's call signature — so the three ways it can go wrong (an
+unsupported argument, an API error, a refusal) each land on the deterministic
+answer rather than on a stack trace, and are each asserted.
+
+CI runs ruff, mypy, the suite, the doctests, a CLI smoke test and a full notebook
+execution on Python 3.10, 3.11 and 3.12 — so a change that breaks the demo, or
+merely fails a lint rule, fails the build.
 
 ---
 
@@ -436,6 +446,14 @@ Stated plainly, with what production would change set out in
   Surfacing "you may be thinking of the old rule" in ordinary answers needs a
   second narrow retrieval pass for conflict detection only; that is not
   implemented.
+- **Confidence is a function of today's date.** Recency decay reads
+  `date.today()` with a 540-day half-life, so the same question asked against
+  the same corpus months apart returns slightly different confidence, and the
+  notebook's committed outputs drift from a fresh run in the third decimal
+  place. Deliberate — a document really does get staler — but it means
+  "deterministic" has a date qualifier. Pinning an evaluation date would mean
+  threading `now` through the orchestrator; `ClaimExtractor.extract` and
+  `ConflictResolver.detect` already accept it.
 - **Conflict detection is O(n²) in claims** — fine here, needs blocking by subject
   at corpus scale.
 - **Numeric extraction** covers the unit families in this corpus, not arbitrary ones.

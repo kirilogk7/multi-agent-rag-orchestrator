@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -82,7 +83,7 @@ class ExecutionPlan:
         if not self.sub_queries:
             lines.append("plan       : abstain -- no domain cleared the confidence floor")
             return "\n".join(lines)
-        lines.append(f"plan       : phase 1 -> {self.primary.domain}; "
+        lines.append(f"plan       : phase 1 -> {self.sub_queries[0].domain}; "
                      f"phase 2 -> {', '.join(s.domain for s in self.supporting) or '(none)'}")
         lines.append("sub-queries:")
         lines.extend("  " + s.describe() for s in self.sub_queries)
@@ -103,7 +104,9 @@ class RAGOrchestrator:
         max_workers: Concurrency for phase 2.
         agent_timeout: Seconds a supporting agent may take before the
             orchestrator gives up on it and degrades the answer. A hung agent
-            must not hang the query.
+            must not hang the query. Enforced on the whole phase-2 fan-out, not
+            per agent: it is a deadline for the query, which is what a caller
+            cares about.
     """
 
     def __init__(
@@ -202,16 +205,16 @@ class RAGOrchestrator:
 
         with Stopwatch() as total:
             with Stopwatch() as timer:
-                if plan is None:
-                    plan = self.plan(query, trace_id=trace_id)
+                resolved_plan = plan if plan is not None else self.plan(
+                    query, trace_id=trace_id)
             stages["classify"] = round(timer.elapsed_ms, 3)
 
-            if not plan.sub_queries:
-                answer = self._abstain(plan, stages, total)
+            if not resolved_plan.sub_queries:
+                answer = self._abstain(resolved_plan, stages, total)
                 return answer
 
             with Stopwatch() as timer:
-                contributions = self._run_agents(plan)
+                contributions = self._run_agents(resolved_plan)
             stages["retrieve"] = round(timer.elapsed_ms, 3)
 
             claims = [c for contribution in contributions for c in contribution.claims]
@@ -224,15 +227,15 @@ class RAGOrchestrator:
 
             with Stopwatch() as timer:
                 answer = self.synthesizer.synthesize(
-                    plan.query, claims, conflicts,
-                    domains=list(plan.classification.domains),
+                    resolved_plan.query, claims, conflicts,
+                    domains=list(resolved_plan.classification.domains),
                     notes=notes, degraded=degraded,
                 )
             stages["synthesize"] = round(timer.elapsed_ms, 3)
 
-        answer.trace_id = plan.trace_id
+        answer.trace_id = resolved_plan.trace_id
         answer.timings_ms = {**stages, "total": round(total.elapsed_ms, 3)}
-        self._record(plan, contributions, answer, expected_domains, stages,
+        self._record(resolved_plan, contributions, answer, expected_domains, stages,
                      total.elapsed_ms)
         return answer
 
@@ -268,7 +271,37 @@ class RAGOrchestrator:
         # Collected in plan order rather than completion order: the answer must
         # not change shape because one agent happened to finish first.
         results: Dict[str, AgentContribution] = {}
-        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(supporting))) as pool:
+
+        def record_failure(sub: SubQuery, exc: BaseException) -> None:
+            LOGGER.warning("supporting agent %s did not complete: %s: %s",
+                           sub.domain, type(exc).__name__, exc)
+            results[sub.domain] = AgentContribution(
+                domain=sub.domain, sub_query=sub.text, issued_query=sub.text,
+                params=sub.params, failed=True,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            self.bus.send(sub.domain, ORCHESTRATOR, MessageType.FAILURE,
+                          {"reason": f"{type(exc).__name__}: {exc}"},
+                          trace_id=plan.trace_id)
+
+        # The timeout belongs on ``as_completed``, not on ``future.result``:
+        # ``as_completed`` only ever yields futures that have *already* finished,
+        # so a result() timeout can never elapse and a hung agent would hang the
+        # whole query. Shutdown is likewise explicit and non-blocking -- exiting
+        # the executor as a context manager joins every worker, which would
+        # reintroduce the same unbounded wait after the timeout fired.
+        #
+        # The residue of that choice, stated rather than hidden: a worker already
+        # past the point of cancellation keeps running after the query has
+        # returned without it. It cannot corrupt the answer (its result is simply
+        # never read) and it does not accumulate -- a finished worker exits on the
+        # shutdown signal -- but ``concurrent.futures`` joins surviving workers at
+        # interpreter exit, so a *genuinely* wedged agent delays process exit even
+        # though it no longer delays the query. Killing a thread mid-call is not
+        # possible in Python; the alternative is a subprocess pool, which is the
+        # right answer once agents call out over the network.
+        pool = ThreadPoolExecutor(max_workers=min(self.max_workers, len(supporting)))
+        try:
             futures = {
                 pool.submit(
                     self.agents[sub.domain].handle, sub,
@@ -276,20 +309,22 @@ class RAGOrchestrator:
                 ): sub
                 for sub in supporting
             }
-            for future in as_completed(futures, timeout=None):
-                sub = futures[future]
-                try:
-                    results[sub.domain] = future.result(timeout=self.agent_timeout)
-                except Exception as exc:  # noqa: BLE001 - degrade, never abort
-                    LOGGER.warning("supporting agent %s did not complete: %s",
-                                   sub.domain, exc)
-                    results[sub.domain] = AgentContribution(
-                        domain=sub.domain, sub_query=sub.text, issued_query=sub.text,
-                        params=sub.params, failed=True,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
-                    self.bus.send(sub.domain, ORCHESTRATOR, MessageType.FAILURE,
-                                  {"reason": str(exc)}, trace_id=plan.trace_id)
+            try:
+                for future in as_completed(futures, timeout=self.agent_timeout):
+                    sub = futures[future]
+                    try:
+                        results[sub.domain] = future.result()
+                    except Exception as exc:  # noqa: BLE001 - degrade, never abort
+                        record_failure(sub, exc)
+            except FuturesTimeoutError as exc:
+                # Whatever has not reported by now is treated as failed, so the
+                # answer degrades on a stated deadline instead of waiting.
+                for future, sub in futures.items():
+                    if sub.domain not in results:
+                        future.cancel()
+                        record_failure(sub, exc)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         contributions.extend(results[sub.domain] for sub in supporting if sub.domain in results)
         return contributions

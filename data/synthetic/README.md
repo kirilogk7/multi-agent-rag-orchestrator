@@ -122,7 +122,8 @@ in turn requires the query to route to both domains. Verified phrasings:
 
 ```bash
 # conflict 1 — numeric, reviewer counts
-python -m rag_system "What approvals are needed to deploy a microservice that touches personal data?"
+python -m rag_system \
+  "What approvals are needed to deploy a microservice that touches personal data?"
 # conflict 2 — numeric, log retention
 python -m rag_system "how long are logs containing personal data retained before deletion"
 # conflict 3 — polarity, verbose tracing (note the phrasing; see the limitation below)

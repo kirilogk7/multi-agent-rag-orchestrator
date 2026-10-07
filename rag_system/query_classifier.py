@@ -312,7 +312,7 @@ class RetrievalPolicy:
     def __init__(self, base: Optional[RetrievalParams] = None) -> None:
         self.base = base or RetrievalParams()
         #: Per-domain learned nudge on the dense/lexical balance, moved by feedback.
-        self.domain_alpha: Dict[str, float] = {d: 1.0 for d in DOMAINS}
+        self.domain_alpha: Dict[str, float] = dict.fromkeys(DOMAINS, 1.0)
 
     def for_sub_query(
         self,
@@ -415,7 +415,7 @@ class QueryClassifier:
         self.max_domains = max_domains
         self.policy = RetrievalPolicy()
         #: Learned multiplier per domain, moved by ``apply_feedback``.
-        self.routing_weights: Dict[str, float] = {d: 1.0 for d in DOMAINS}
+        self.routing_weights: Dict[str, float] = dict.fromkeys(DOMAINS, 1.0)
         self._vocab: Dict[str, int] = {}
         self._idf: np.ndarray = np.zeros((0,), dtype=np.float32)
         self._centroids: Dict[str, np.ndarray] = {}
@@ -520,7 +520,10 @@ class QueryClassifier:
         ratios = [(v / ceiling) if ceiling > 0 else 0.0 for v in centroid_values]
 
         results: List[DomainScore] = []
-        for (domain, (centroid_sim, cue_score, matched)), ratio in zip(raw.items(), ratios):
+        # strict: both are built by iterating DOMAINS, so a length or ordering
+        # mismatch would be a bug rather than something to paper over.
+        for (domain, (centroid_sim, cue_score, matched)), ratio in zip(
+                raw.items(), ratios, strict=True):
             weight = self.routing_weights.get(domain, 1.0)
             blended = self._combine_evidence(cue_score, ratio) * weight
             results.append(

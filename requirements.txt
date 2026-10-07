@@ -10,3 +10,8 @@ numpy>=1.24
 pytest>=7.4
 jupyter>=1.0
 matplotlib>=3.7
+
+# Static analysis. Configured in pyproject.toml and enforced in CI, so a lint
+# finding is a failed build rather than a note in a review.
+ruff>=0.6
+mypy>=1.11

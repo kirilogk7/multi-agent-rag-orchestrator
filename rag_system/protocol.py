@@ -56,12 +56,12 @@ class Message:
     Attributes:
         message_id: Unique identifier for this envelope.
         trace_id: Groups every message belonging to one top-level query.
-        parent_id: The message this one responds to, giving a causal chain.
         sender: Address of the sending agent.
         recipient: Address of the intended recipient, or ``BROADCAST``.
         type: Protocol verb.
         payload: Type-specific body. Kept as a plain dict so the transcript
             stays serialisable for audit export.
+        parent_id: The message this one responds to, giving a causal chain.
         timestamp: Unix timestamp at construction.
         sequence: Monotonic counter giving a total order across the bus, which
             wall-clock timestamps cannot guarantee under concurrency.

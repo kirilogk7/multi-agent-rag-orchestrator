@@ -23,14 +23,21 @@ domain before the supporting ones rather than fanning all of them out at once.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .monitoring import AgentRecord
 from .protocol import Blackboard, BROADCAST, MessageBus, MessageType, ORCHESTRATOR
 from .query_classifier import SubQuery
 from .synthesis import Claim, ClaimExtractor
-from .utils import RetrievedChunk, Stopwatch, get_logger, normalize_text, truncate
+from .utils import (
+    DOMAINS,
+    RetrievedChunk,
+    Stopwatch,
+    get_logger,
+    normalize_text,
+    truncate,
+)
 from .vector_store import KnowledgeBase, RetrievalParams
 
 LOGGER = get_logger(__name__)
@@ -273,7 +280,8 @@ class DomainAgent:
         contributions far more than it needs a stack trace.
         """
         context = self._read_context(trace_id)
-        terms = self.context_extractor.expansion_terms(context) if sub_query.params.expand_query else []
+        terms = (self.context_extractor.expansion_terms(context)
+                 if sub_query.params.expand_query else [])
         issued = self._expand_query(sub_query.text, terms)
 
         contribution = AgentContribution(
@@ -341,7 +349,6 @@ class DomainAgent:
         """
         if self.blackboard is None:
             return {}
-        from .utils import DOMAINS
         peers = {d for d in DOMAINS if d != self.domain}
         peer_facts = [f for f in self.blackboard.facts(trace_id) if f.author in peers]
         if not peer_facts:
@@ -372,7 +379,6 @@ class DomainAgent:
         """Scale claim confidence by this agent's learned trust weight."""
         if abs(self.trust_weight - 1.0) < 1e-9:
             return list(claims)
-        from dataclasses import replace
         return [
             replace(claim, confidence=float(round(
                 max(0.0, min(1.0, claim.confidence * self.trust_weight)), 4)))
@@ -438,6 +444,8 @@ class DomainAgent:
         """Send the terminal protocol message for this contribution."""
         if self.bus is None:
             return
+        kind: MessageType
+        payload: Dict[str, Any]
         if contribution.failed:
             kind, payload = MessageType.FAILURE, {"reason": contribution.error}
         elif contribution.abstained:
@@ -489,7 +497,6 @@ def build_agents(
     extractor: Optional[ClaimExtractor] = None,
 ) -> Dict[str, DomainAgent]:
     """Construct one agent per domain, sharing bus, blackboard and extractor."""
-    from .utils import DOMAINS
     shared_extractor = extractor or ClaimExtractor()
     shared_context = ContextExtractor()
     return {

@@ -297,7 +297,9 @@ structured findings rather than prose. It buys three things that matter more for
 this brief:
 
 - every sentence is verbatim from a source document, so it cannot hallucinate;
-- output is byte-identical across runs, so the notebook and tests are reproducible;
+- output is byte-identical for a given corpus and a given date, so the notebook
+  and tests are reproducible (recency decay reads `date.today()`, so confidence
+  scores drift slowly over calendar time -- see §5);
 - no API key, no network, no model download.
 
 `ClaudeSynthesizer` is the generative counterpart, active only when a credential
@@ -462,7 +464,7 @@ Document metadata is not decoration: `authority`, `effective_date`, `version`,
 | Embeddings | local TF-IDF + SVD | transformer encoder | Reviewer-runnable in seconds with no download. In production, a real encoder behind the same interface, plus a cross-encoder reranker. |
 | Vector index | in-memory numpy | pgvector / Qdrant / Pinecone | 101 passages makes a brute-force scan free. Beyond ~10⁵ passages, an ANN index with metadata filtering. |
 | Index updates | full namespace refit on ingest | incremental projection | Correct rather than merely convenient: adding a document changes the IDF landscape, and projecting into a stale latent space quietly degrades every comparison. With a pretrained encoder (`requires_refit_on_add = False`) this becomes a true incremental upsert. |
-| Synthesis | extractive | generative | Determinism and zero hallucination for the demo; `ClaudeSynthesizer` is the production path. |
+| Synthesis | extractive | generative | Determinism and zero hallucination, and a deterministic core is the regulated-environment default rather than a demo convenience. `ClaudeSynthesizer` is the optional generative layer over the *same* resolved conflicts; before it could be enabled on real data it needs a data-classification gate, prompt-injection handling and an audit log of third-party calls, none of which exist here. |
 | Conflict resolution | weighted heuristic | learned ranker | Auditable and explainable, which a governance decision has to be. A learned ranker would need labelled adjudications. |
 | Concurrency | two-phase, threads | flat async fan-out | Context sharing requires an ordering. At scale, phase 2 becomes async I/O against a remote store. |
 | Classifier | lexicon + centroids | fine-tuned classifier | No labelled routing data exists here, and the hybrid is debuggable per-signal. |
@@ -491,7 +493,11 @@ it was built for — "you may be thinking of the old rule, here is what changed"
 requires a second narrow retrieval pass used for conflict detection only, never for
 quotation. Not implemented.
 
-Beyond those: sentence splitting is regex-based and will merge
+Beyond those: claim confidence is a function of `date.today()` through recency
+decay, so it drifts slowly over calendar time and "deterministic" carries a date
+qualifier; `ClaimExtractor.extract` and `ConflictResolver.detect` both accept an
+explicit `now` for a pinned evaluation, but the orchestrator does not thread one
+through. Sentence splitting is regex-based and will merge
 sentences in messier prose. The cue lexicons are hand-authored and would need
 maintenance as domains evolve. Conflict detection is O(n²) in claims, which is
 fine at this scale but would need blocking by subject at corpus scale. Numeric
