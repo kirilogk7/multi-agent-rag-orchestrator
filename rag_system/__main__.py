@@ -13,6 +13,7 @@ import sys
 from typing import List, Optional, Sequence
 
 from .orchestrator import build_default_orchestrator
+from .synthesis import ClaudeSynthesizer
 from .utils import DOMAINS
 
 DEMO_QUERIES: Sequence[str] = (
@@ -37,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--explain", action="store_true",
                         help="also print the plan, agent transcript and citation audit")
     parser.add_argument("--claude", action="store_true",
-                        help="use Claude for prose synthesis when ANTHROPIC_API_KEY is set")
+                        help="synthesise prose with Claude; requires this flag AND "
+                             "ANTHROPIC_API_KEY, and falls back to the deterministic "
+                             "extractive synthesiser on any failure")
     parser.add_argument("--expect", nargs="*", default=[], metavar="DOMAIN",
                         choices=list(DOMAINS), help="ground-truth domains, for metrics")
     parser.add_argument("--stats", action="store_true",
@@ -93,6 +96,12 @@ def run(argv: Optional[List[str]] = None) -> int:
             # deliberately and silently -- so without this line there is no way
             # to tell from the output whether --claude did anything.
             print(f"Synthesizer: {answer.synthesizer}")
+            # A credential on its own does nothing: generative synthesis is
+            # opt-in, because a deterministic answer is the right default. Saying
+            # so here costs one line and saves assuming the key was the problem.
+            if not args.claude and ClaudeSynthesizer.available():
+                print("  (an Anthropic credential is set but unused -- "
+                      "pass --claude to synthesise prose with it)")
             print(f"Timings (ms): {json.dumps(answer.timings_ms)}")
 
     if args.stats:

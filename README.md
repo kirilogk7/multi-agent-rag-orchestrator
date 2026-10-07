@@ -64,10 +64,16 @@ export ANTHROPIC_API_KEY=sk-ant-...   # ANTHROPIC_AUTH_TOKEN also works
 python -m rag_system --demo --claude --explain
 ```
 
+**`--claude` is required.** A credential on its own changes nothing: generative
+synthesis is opt-in, because a deterministic answer is the right default. With a
+key set but the flag omitted, `--explain` says so rather than leaving you to
+wonder whether the key was at fault.
+
 `Synthesizer: claude:claude-opus-5` in the output means the generative path ran;
 `Synthesizer: extractive` means it fell back, and the reason is logged at WARNING
 on stderr. Falling back is deliberate — any API failure costs prose, never the
-answer — so without that line a silent fallback is invisible.
+answer — so without that line a silent fallback is invisible. The default model is
+`claude-opus-5`; to use another, construct `ClaudeSynthesizer(model=...)` directly.
 
 **You do not need to run the notebook.** It is committed with executed outputs, so
 it renders in full on GitHub, charts included — and CI executes it end to end on
