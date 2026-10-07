@@ -234,14 +234,27 @@ them unaware they are non-compliant. Every conflict shows the adopted guidance,
 the overruled guidance, the basis, and the margin — flagged as unsettled when the
 margin is thin.
 
-**6. Extractive synthesis by default.** Every sentence in the answer is verbatim
-from a source document, so it cannot hallucinate, and output is byte-identical
-across runs. *Cost:* it reads as structured findings rather than prose.
-`ClaudeSynthesizer` is the generative counterpart, active only when a credential
-is present; it is given the *already-resolved* conflicts and may not re-adjudicate
-them, because that is a governance decision with an auditable basis and should not
-be delegated to a sampled output. Any API failure falls back to the extractive
-path, so enabling it can degrade prose but never lose the answer.
+**6. The deterministic core never depends on a third-party call, by design.**
+This is a regulated-environment default, not a convenience shortcut. The
+extractive path makes every sentence in the answer verbatim from a source
+document — so it cannot hallucinate a figure or an obligation that doesn't
+exist in the corpus, output is byte-identical and therefore reconstructible
+for audit, and the system keeps answering if a vendor API is unreachable,
+rate-limited, or simply not approved for this workload yet. *Cost:* it reads
+as structured findings rather than prose.
+
+`ClaudeSynthesizer` is the optional generative layer, active only when a
+credential is present, and it is deliberately confined to *prose*, not
+*decisions*: it is handed the *already-resolved* conflicts and is explicitly
+forbidden from re-adjudicating them, because which guidance wins is a
+governance decision with an auditable, weighted basis — authority, domain
+precedence, recency — and that basis should never be delegated to a sampled
+output that can't be queried for why it chose what it chose. Any API failure
+falls back to the deterministic path automatically, so enabling it can
+degrade prose quality but can never lose the answer or silently change what
+the system concluded. This is the general shape a bank's model-risk function
+tends to require for any LLM in a decision path: a deterministic system of
+record, with the model confined to a layer it cannot make decisions from.
 
 **7. Citations are verified, not just rendered.** Each claim carries the character
 span it came from, and `verify_citations` re-reads every span. This guards the
@@ -426,6 +439,29 @@ Stated plainly, with what production would change set out in
 - **Conflict detection is O(n²) in claims** — fine here, needs blocking by subject
   at corpus scale.
 - **Numeric extraction** covers the unit families in this corpus, not arbitrary ones.
+- **`ClaudeSynthesizer` has no data-classification gate before egress.** When
+  enabled, the full text of every retrieved finding — including compliance and
+  technical passages — is sent to a third-party API with no filtering or
+  redaction step. In a regulated environment this needs a classification pass
+  (what may leave the perimeter at all) before a synthesis pass (how to phrase
+  what's allowed to leave), and those are two different gates, not one.
+- **No prompt-injection defense beyond instruction.** The system prompt tells
+  the model to use only the supplied findings, but that is an instruction, not
+  a control — a document in the corpus is retrieved and templated directly
+  into the prompt, so an adversarially-authored or compromised document is an
+  injection vector the pipeline does not currently detect or sandbox against.
+- **No audit log of third-party calls.** What was sent to the API, when, and by
+  whom is not currently recorded anywhere, which is the first thing a vendor-risk
+  review would ask for once an external model is in the loop at all.
+- **`Synthesizer` is provider-pluggable in principle, Anthropic-only in
+  practice.** The interface is real (`ExtractiveSynthesizer` and
+  `ClaudeSynthesizer` both implement it with nothing else in the orchestrator
+  changing), but there is exactly one concrete LLM implementation. An Azure
+  OpenAI backend behind the same interface would need its own client setup and
+  response parsing, but the same two constraints already enforced on the
+  Claude path — no conflict re-adjudication, deterministic fallback on any
+  failure — would carry over unchanged, because those constraints live in the
+  orchestrator's contract with `Synthesizer`, not in anything Claude-specific.
 - **Not implemented:** query caching, authentication and document-level access
   control, multi-turn conversational context, a held-out evaluation harness with
   regression gates, streaming partial answers.

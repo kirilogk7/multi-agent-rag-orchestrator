@@ -87,26 +87,27 @@ user Orchestrator Classifier Technical Blackboard Compliance Resolver
 +----+------------+----------+---------+----------+----------+---------
 Q --->            |          |         |          |          |
 |    1------------>          |         |          |          |
-|    |            2          |         |          |          |
+|    |            (2)        |         |          |          |
 |    3--------------------------------->          |          |
 |    |            |          |         |          |          |
 == PHASE 1 (primary domain, sequential, unexpanded) == ================
 |    4----------------------->         |          |          |
-|    |            |          5         |          |          |
+|    |            |          (5)       |          |          |
 |    |            |          6--------->          |          |
 |    <-----------------------7         |          |          |
 |    |            |          |         |          |          |
 == PHASE 2 (supporting domains, concurrent, context-expanded) == ======
 |    8-------------------------------------------->          |
 |    |            |          |         9---------->          |
-|    |            |          |         |          10         |
+|    |            |          |         |          (10)       |
 |    <--------------------------------------------11         |
 |    |            |          |         |          |          |
 |    12------------------------------------------------------>
 |    <-------------------------------------------------------13
-|    14           |          |         |          |          |
+|    (14)         |          |         |          |          |
 < ----
 
+  (N) = internal step, no message sent -- N--> / <--N is a message
   Q query arrives
   1 classify
   2 domains={technical,compliance}; intent=procedural,
@@ -423,12 +424,34 @@ routed to means a cue-lexicon problem. The aggregate number hides all three.
   +-----+
   |Claim|
   +-----+
-
-Claim --pairs--> Conflict --+
-                             +--> Answer --> Citation --verify--> source span
-Claim --kept---> synthesis --+   |
-                                 +-- confidence, notes, degraded, timings
+     |
+  +---------------+
+  v pairs         | kept
+  +--------+      |
+  |Conflict|      |
+  +--------+      |
+       |          |
+       +----+-----+
+            v
+  +-----------------+
+  |     Answer      |
+  |confidence, notes|
+  |degraded, timings|
+  +-----------------+
+           |
+           v
+  +-------------------------+
+  |        Citation         |
+  |marker, doc_id, char span|
+  +-------------------------+
+               | verify
+               v
+          source span (re-read, must match)
 ```
+
+Claim pairs that contradict become a `Conflict`; the resolved conflict is
+reported in the `Answer`, never dropped. Claims that survive (including the
+overruled side) are `kept` and feed the `Answer` directly.
 
 Document metadata is not decoration: `authority`, `effective_date`, `version`,
 `status` and `supersedes` are all consumed by conflict resolution.
