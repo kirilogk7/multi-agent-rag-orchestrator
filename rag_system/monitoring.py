@@ -74,6 +74,14 @@ class QueryRecord:
 
     @property
     def routing_precision(self) -> Optional[float]:
+        """Share of routed domains that were expected, or ``None`` if unlabelled.
+
+        The ``None`` and the ``0.0`` mean different things and must not be
+        collapsed: ``None`` is "this query carried no ground truth, so it says
+        nothing about routing quality", while ``0.0`` is "ground truth existed
+        and we missed it entirely". Averaging an unlabelled query in as a zero
+        would silently punish the classifier for a question nobody graded.
+        """
         if not self.expected_domains:
             return None
         if not self.routed_domains:
@@ -83,6 +91,12 @@ class QueryRecord:
 
     @property
     def routing_recall(self) -> Optional[float]:
+        """Share of expected domains that were routed, or ``None`` if unlabelled.
+
+        No zero-routed special case is needed here, unlike
+        :attr:`routing_precision`: the denominator is the expected set, which
+        the guard above has already established is non-empty.
+        """
         if not self.expected_domains:
             return None
         hits = len(set(self.routed_domains) & set(self.expected_domains))

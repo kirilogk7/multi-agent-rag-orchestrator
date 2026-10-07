@@ -45,15 +45,17 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 71 tests, 2-10s
+python -m pytest tests/ -q                 # 74 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
 ```
 
 `--explain` prints the execution plan, the inter-agent message transcript, the
-citation audit and which synthesiser produced the answer. It is the fastest way
-to see that the coordination is real rather than decorative.
+provenance chain walking the final message back to the routing decision that
+caused it, the shared context agents left on the blackboard, the citation audit
+and which synthesiser produced the answer. It is the fastest way to see that the
+coordination is real rather than decorative.
 
 To try the optional generative synthesis, nothing goes in the repo — the
 credential is read from the environment:
@@ -377,7 +379,7 @@ capability visibly changes behaviour:
 ├── data/synthetic/               # 49 documents, 3 domains + update fixture
 │   └── README.md                 # provenance, schema, planted conflicts
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 63 tests, 71 cases
+├── tests/test_scenarios.py       # 66 tests, 74 cases
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
@@ -417,13 +419,13 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q                      # 71 tests
+python -m pytest tests/ -q                      # 74 tests
 python -m pytest --doctest-modules rag_system/  # worked examples in docstrings
 python -m ruff check .                          # config in pyproject.toml
 python -m mypy
 ```
 
-Coverage is 87% of statements, weighted towards the failure modes rather than the
+Coverage is 88% of statements, weighted towards the failure modes rather than the
 happy path: the suite asserts that out-of-domain queries abstain, that a crashed
 agent degrades rather than aborts, that a *hung* agent is abandoned on a deadline
 instead of stalling the query, that degradation *lowers* reported confidence, that

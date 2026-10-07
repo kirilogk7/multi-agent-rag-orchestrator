@@ -65,6 +65,10 @@ class ExecutionPlan:
     classification: Classification
     sub_queries: Tuple[SubQuery, ...]
     seeded_context: Dict[str, Any] = field(default_factory=dict)
+    # The routing decision's message id. Carried so every agent request can
+    # name it as its parent, which is what lets ``causal_chain`` walk an answer
+    # back to the routing that caused it rather than stopping at the request.
+    origin_message_id: Optional[str] = None
 
     @property
     def primary(self) -> Optional[SubQuery]:
@@ -155,12 +159,13 @@ class RAGOrchestrator:
         if seeded:
             self.blackboard.write_many(trace_id, seeded,
                                        author=QUERY_SEED_AUTHOR, confidence=0.5)
-        self.bus.send(CLASSIFIER, ORCHESTRATOR, MessageType.RESULT,
-                      {"reason": f"routed to {', '.join(classification.domains) or 'none'}",
-                       "intent": classification.intent.value,
-                       "complexity": classification.complexity,
-                       "confidence": round(classification.confidence, 3)},
-                      trace_id=trace_id)
+        routed = self.bus.send(
+            CLASSIFIER, ORCHESTRATOR, MessageType.RESULT,
+            {"reason": f"routed to {', '.join(classification.domains) or 'none'}",
+             "intent": classification.intent.value,
+             "complexity": classification.complexity,
+             "confidence": round(classification.confidence, 3)},
+            trace_id=trace_id)
 
         return ExecutionPlan(
             trace_id=trace_id,
@@ -168,6 +173,7 @@ class RAGOrchestrator:
             classification=classification,
             sub_queries=tuple(sub_queries),
             seeded_context=seeded,
+            origin_message_id=routed.message_id,
         )
 
     # -- execution -------------------------------------------------------- #
@@ -248,7 +254,7 @@ class RAGOrchestrator:
         request = self.bus.send(
             ORCHESTRATOR, primary.domain, MessageType.REQUEST,
             {"sub_query": primary.text, "phase": 1, "params": primary.params.describe()},
-            trace_id=plan.trace_id,
+            trace_id=plan.trace_id, parent_id=plan.origin_message_id,
         )
         contributions.append(
             self.agents[primary.domain].handle(
@@ -263,7 +269,7 @@ class RAGOrchestrator:
             sub.domain: self.bus.send(
                 ORCHESTRATOR, sub.domain, MessageType.REQUEST,
                 {"sub_query": sub.text, "phase": 2, "params": sub.params.describe()},
-                trace_id=plan.trace_id,
+                trace_id=plan.trace_id, parent_id=plan.origin_message_id,
             )
             for sub in supporting
         }
@@ -544,8 +550,18 @@ class RAGOrchestrator:
         return verify_citations(answer, self.knowledge_base.document)
 
     def explain(self, trace_id: str) -> str:
-        """Render the full inter-agent transcript for one query."""
-        return self.bus.render_trace(trace_id)
+        """Render the inter-agent transcript and the context the agents shared.
+
+        Two different things, both needed to answer "why this answer": the
+        transcript is the message flow, the blackboard snapshot is the state
+        that flow produced and that later agents actually read.
+        """
+        lines = [self.bus.render_trace(trace_id)]
+        shared = self.blackboard.snapshot(trace_id)
+        if shared:
+            lines.append(f"Shared context on the blackboard ({len(shared)} keys):")
+            lines.extend(f"  {key} = {value!r}" for key, value in shared.items())
+        return "\n".join(lines)
 
     def stats(self) -> Dict[str, Any]:
         """Corpus, agent and metrics statistics in one payload."""

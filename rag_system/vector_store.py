@@ -314,6 +314,10 @@ class BM25Index:
     def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
         self.k1 = k1
         self.b = b
+        self._reset()
+
+    def _reset(self) -> None:
+        """Drop every indexed passage and its corpus statistics."""
         self._doc_tokens: List[List[str]] = []
         self._doc_len: List[int] = []
         self._term_freqs: List[Counter] = []
@@ -362,7 +366,7 @@ class BM25Index:
 
     def clear(self) -> None:
         """Reset the index, keeping the configured k1 and b."""
-        self.__init__(k1=self.k1, b=self.b)  # type: ignore[misc]
+        self._reset()
 
 
 # --------------------------------------------------------------------------- #

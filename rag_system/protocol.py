@@ -194,11 +194,6 @@ class MessageBus:
         with self._lock:
             return [m for m in self._transcript if m.trace_id == trace_id]
 
-    def transcript(self, *, limit: Optional[int] = None) -> List[Message]:
-        """The full ordered transcript, optionally only the most recent entries."""
-        with self._lock:
-            return list(self._transcript[-limit:] if limit else self._transcript)
-
     def causal_chain(self, message_id: str) -> List[Message]:
         """Walk ``parent_id`` links from a message back to its root cause."""
         with self._lock:
@@ -213,12 +208,25 @@ class MessageBus:
             return list(reversed(chain))
 
     def render_trace(self, trace_id: str) -> str:
-        """Human-readable transcript for one query."""
+        """Human-readable transcript for one query, plus the final provenance chain.
+
+        The flat transcript shows *what* was sent. The chain underneath shows
+        *why* the last message exists, by walking ``parent_id`` back to the one
+        that started the query -- which is the difference between a log and an
+        audit trail when several agents contributed to a single answer.
+        """
         messages = self.trace(trace_id)
         if not messages:
             return f"(no messages for trace {trace_id})"
         lines = [f"Transcript for trace {trace_id} ({len(messages)} messages)"]
         lines.extend("  " + m.summary() for m in messages)
+        chain = self.causal_chain(messages[-1].message_id)
+        if len(chain) > 1:
+            lines.append(f"Provenance of the final message ({len(chain)} steps):")
+            lines.extend(
+                f"  {i + 1}. {m.type.value:<8} {m.sender} -> {m.recipient}"
+                for i, m in enumerate(chain)
+            )
         return "\n".join(lines)
 
     def clear(self) -> None:
@@ -304,7 +312,7 @@ class Blackboard:
         return max(enumerate(facts), key=lambda pair: (pair[1].confidence, pair[0]))[1].value
 
     def snapshot(self, trace_id: str) -> Dict[str, Any]:
-        """Flattened ``key -> best value`` view, for prompt construction."""
+        """Flattened ``key -> best value`` view of everything agents shared."""
         with self._lock:
             keys = {f.key for f in self._facts[trace_id]}
         return {k: self.best(trace_id, k) for k in sorted(keys)}
@@ -313,15 +321,6 @@ class Blackboard:
         """Every fact on the board for one trace, in write order."""
         with self._lock:
             return list(self._facts[trace_id])
-
-    def authors(self, trace_id: str) -> List[str]:
-        """Distinct agents that contributed context to this trace."""
-        with self._lock:
-            seen: List[str] = []
-            for fact in self._facts[trace_id]:
-                if fact.author not in seen:
-                    seen.append(fact.author)
-            return seen
 
     def clear(self, trace_id: Optional[str] = None) -> None:
         """Drop one trace's context, or everything."""

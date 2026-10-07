@@ -10,6 +10,7 @@ Everything runs offline against the bundled synthetic corpus in a few seconds.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -21,7 +22,7 @@ import pytest
 
 from rag_system.domain_agents import DomainAgent
 from rag_system.orchestrator import RAGOrchestrator
-from rag_system.protocol import MessageType
+from rag_system.protocol import MessageBus, MessageType
 from rag_system.query_classifier import QueryIntent
 from rag_system.synthesis import (
     Answer,
@@ -1154,3 +1155,64 @@ def test_empty_registry_reports_cleanly() -> None:
     orchestrator = RAGOrchestrator(KnowledgeBase(load_corpus()))
     assert orchestrator.metrics.summary() == {"queries": 0}
     assert orchestrator.metrics.report() == "No queries recorded."
+
+
+def test_explain_renders_the_flow_and_the_state_it_produced(
+    fresh_orchestrator: RAGOrchestrator
+) -> None:
+    """``explain`` must answer "why this answer", not just "what was sent".
+
+    Three things have to survive into the rendering, because each answers a
+    different question a reviewer will ask: the message flow, the provenance
+    chain behind the final message, and the context agents actually shared.
+    """
+    query = ("What's the process for deploying a new microservice and what "
+             "compliance checks are needed?")
+    plan = fresh_orchestrator.plan(query)
+    answer = fresh_orchestrator.answer(query, plan=plan)
+
+    rendered = fresh_orchestrator.explain(answer.trace_id)
+
+    assert f"Transcript for trace {answer.trace_id}" in rendered
+    assert "Provenance of the final message" in rendered
+    assert "Shared context on the blackboard" in rendered
+    # The seeded fact is the one a reader can check by hand against the query.
+    assert "environment" in rendered
+
+    # The provenance chain is a real walk back up parent_id, not a relabelled
+    # copy of the transcript. It must reach the routing decision: an answer
+    # whose chain stops at "a request caused a result" explains nothing.
+    messages = fresh_orchestrator.bus.trace(answer.trace_id)
+    chain = fresh_orchestrator.bus.causal_chain(messages[-1].message_id)
+    assert len(chain) >= 3, f"chain too shallow to be provenance: {len(chain)}"
+    assert chain[0].parent_id is None, "the chain does not reach a root cause"
+    assert chain[0].sender == "query_classifier", (
+        "the chain bottoms out somewhere other than the routing decision")
+    assert chain[0].message_id == plan.origin_message_id
+    assert chain[-1].message_id == messages[-1].message_id
+
+
+def test_explain_on_an_unknown_trace_does_not_raise(
+    fresh_orchestrator: RAGOrchestrator
+) -> None:
+    assert "no messages for trace" in fresh_orchestrator.explain("nonexistent")
+
+
+def test_a_message_survives_a_serialisation_round_trip() -> None:
+    """``to_dict`` is the audit-export path, so it must lose nothing."""
+    bus = MessageBus()
+    bus.register("compliance")
+    sent = bus.send(
+        sender="orchestrator", recipient="compliance",
+        type=MessageType.REQUEST, payload={"sub_query": "retention period"},
+        trace_id="t1",
+    )
+
+    payload = sent.to_dict()
+    assert payload["type"] == MessageType.REQUEST.value
+    assert payload["payload"]["sub_query"] == "retention period"
+    assert set(payload) == {
+        "message_id", "trace_id", "parent_id", "sender", "recipient",
+        "type", "payload", "timestamp", "sequence",
+    }
+    assert json.loads(json.dumps(payload)) == payload, "not JSON-serialisable"
