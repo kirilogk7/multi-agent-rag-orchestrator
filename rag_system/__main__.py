@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from typing import List, Optional, Sequence
 
 from .orchestrator import build_default_orchestrator
 from .synthesis import ClaudeSynthesizer
-from .utils import DOMAINS
+from .utils import DOMAINS, LOG_FORMAT
 
 DEMO_QUERIES: Sequence[str] = (
     "What's the process for deploying a new microservice and what compliance "
@@ -58,6 +59,13 @@ def run(argv: Optional[List[str]] = None) -> int:
         Process exit code: ``0`` on success, ``2`` on an invalid query.
     """
     args = build_parser().parse_args(argv)
+
+    # Configuring logging is the application's job, not the library's: the
+    # package itself attaches only a NullHandler. Records go to stderr so they
+    # stay separable from the answer on stdout -- `... --explain > answer.txt`
+    # keeps the diagnostics on the terminal.
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stderr)
+
     queries = [" ".join(args.query)] if args.query else []
     if args.demo or not queries:
         queries = list(DEMO_QUERIES)

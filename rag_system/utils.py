@@ -685,14 +685,30 @@ class Stopwatch:
         self.elapsed_ms = (time.perf_counter() - self._start) * 1000.0
 
 
-def get_logger(name: str = "rag_system", level: int = logging.INFO) -> logging.Logger:
-    """Return a configured logger, attaching a handler at most once."""
+#: Shared by the CLI and the demo notebook, so a log line looks the same
+#: wherever it is read. Applications that embed the package are free to ignore
+#: it and format records however they already do.
+LOG_FORMAT = "%(levelname)-7s %(name)s | %(message)s"
+
+
+def get_logger(name: str = "rag_system") -> logging.Logger:
+    """Return the package logger for ``name``, with no handler of its own.
+
+    A library must not configure logging for the application that imports it.
+    Attaching a ``StreamHandler`` here would push this package's records onto
+    somebody else's stderr, and calling ``setLevel`` would overrule a decision
+    that belongs to them. ``NullHandler`` is the documented way to stay silent
+    by default while still emitting records to whatever the application has
+    configured -- which is what :mod:`rag_system.__main__` and the demo
+    notebook both do, via ``logging.basicConfig``.
+
+    It also fixes a presentational problem: a ``StreamHandler`` defaults to
+    stderr, and Jupyter renders *all* stderr on a red background, so a routine
+    INFO line about document ingestion looked identical to a crash.
+    """
     logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(levelname)-7s %(name)s | %(message)s"))
-        logger.addHandler(handler)
-    logger.setLevel(level)
+    if not any(isinstance(h, logging.NullHandler) for h in logger.handlers):
+        logger.addHandler(logging.NullHandler())
     return logger
 
 
