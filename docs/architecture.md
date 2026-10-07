@@ -309,6 +309,13 @@ because conflict resolution here is a governance decision with an auditable basi
 and should not be delegated to a sampled output. Any API failure falls back to
 the extractive path, so enabling it can degrade prose but never lose the answer.
 
+The confidence line and any caveats are appended on both paths from the same
+renderer, because that is the audit-relevant half of the answer and none of it
+comes from the model: the score, the corroboration count, whether a conflict was
+settled decisively, whether an agent failed. The generative path originally
+omitted it, so a Claude-synthesised answer never showed the confidence the system
+had assigned -- the number was on the object but invisible where it is read.
+
 The citation numbering is shared between the two synthesisers, so a marker means
 the same thing whichever produced the text, and the source list is filtered to
 what the prose actually cites — the model is handed more findings than it chooses

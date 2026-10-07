@@ -47,6 +47,37 @@ from .utils import (
 LOGGER = get_logger(__name__)
 
 
+def render_confidence(
+    confidence: float,
+    claims: Sequence["Claim"],
+    conflicts: Sequence["Conflict"],
+    degraded: bool,
+    notes: Sequence[str],
+) -> str:
+    """Render the confidence line and any caveats.
+
+    Module-level, and appended by *both* synthesisers, because this is the
+    audit-relevant half of the answer and none of it comes from a model: the
+    score, the corroboration count, whether a conflict was settled decisively,
+    whether an agent failed. The generative path used to omit it -- its text was
+    the model's prose plus a source list -- so a reader of a Claude-synthesised
+    answer never saw the confidence the system had assigned, or the note saying
+    one agent had refined its search off another's findings. The numbers were
+    still on the ``Answer`` object; they were simply invisible where it counts.
+    """
+    label = confidence_label(confidence)
+    parts = [f"{len(claims)} finding(s) from {len({c.doc_id for c in claims})} document(s)"]
+    if conflicts:
+        decisive = sum(1 for c in conflicts if c.decisive)
+        parts.append(f"{decisive}/{len(conflicts)} conflict(s) resolved decisively")
+    if degraded:
+        parts.append("one or more agents failed -- answer is partial")
+    text = f"Confidence: {confidence:.2f} ({label}) -- " + "; ".join(parts) + "."
+    if notes:
+        text += "\n" + "\n".join(f"  note: {n}" for n in notes)
+    return text
+
+
 def _describe_exception(exc: BaseException, *, max_depth: int = 4) -> str:
     """Render an exception together with the chain that caused it.
 
@@ -941,7 +972,7 @@ class ExtractiveSynthesizer(Synthesizer):
         if conflicts:
             sections.append(self._conflict_section(conflicts, marker_of))
         confidence = self._confidence(kept, conflicts, degraded)
-        sections.append(self._confidence_section(confidence, kept, conflicts, degraded, notes))
+        sections.append(render_confidence(confidence, kept, conflicts, degraded, notes))
         sections.append("Sources\n" + "\n".join("  " + c.render() for c in citations))
 
         return Answer(
@@ -1135,21 +1166,6 @@ class ExtractiveSynthesizer(Synthesizer):
             score -= 0.12
         return float(round(max(0.0, min(1.0, score)), 4))
 
-    @staticmethod
-    def _confidence_section(confidence: float, claims: Sequence[Claim],
-                            conflicts: Sequence[Conflict], degraded: bool,
-                            notes: Sequence[str]) -> str:
-        label = confidence_label(confidence)
-        parts = [f"{len(claims)} finding(s) from {len({c.doc_id for c in claims})} document(s)"]
-        if conflicts:
-            decisive = sum(1 for c in conflicts if c.decisive)
-            parts.append(f"{decisive}/{len(conflicts)} conflict(s) resolved decisively")
-        if degraded:
-            parts.append("one or more agents failed -- answer is partial")
-        text = f"Confidence: {confidence:.2f} ({label}) -- " + "; ".join(parts) + "."
-        if notes:
-            text += "\n" + "\n".join(f"  note: {n}" for n in notes)
-        return text
 
 
 class ClaudeSynthesizer(Synthesizer):
@@ -1279,7 +1295,16 @@ class ClaudeSynthesizer(Synthesizer):
             # finding here would reintroduce that, because the model is given
             # more findings than it chooses to cite.
             cited = self._citations_in(text, baseline)
-            appendix = "\n\nSources\n" + "\n".join("  " + c.render() for c in cited)
+            # The confidence line and caveats are ours, not the model's, and are
+            # the part an auditor reads. Appended rather than left to the prompt
+            # for the same reason the source list is: the model must not be able
+            # to restate, round or quietly omit them.
+            appendix = (
+                "\n\n" + render_confidence(baseline.confidence, baseline.claims,
+                                            baseline.conflicts, degraded,
+                                            (*notes, f"prose synthesised by {self.model}"))
+                + "\n\nSources\n" + "\n".join("  " + c.render() for c in cited)
+            )
             return Answer(
                 query=query,
                 text=text + appendix,

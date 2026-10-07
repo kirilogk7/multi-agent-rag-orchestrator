@@ -988,6 +988,39 @@ def test_describe_exception_renders_the_chain_without_looping() -> None:
     assert _describe_exception(ValueError("alone")) == "ValueError: alone"
 
 
+def test_both_synthesizers_report_the_same_confidence_in_the_text(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The audit-relevant line must survive the switch to generative prose.
+
+    Observed against the real API: the generative answer was the model's prose
+    plus a source list, so `Confidence: 0.75 (high)` and the note about one agent
+    refining its search off another's findings -- the two things an auditor reads
+    and neither of which comes from the model -- were absent from the visible
+    answer, while still sitting on the Answer object.
+    """
+    query = "How long are logs containing personal data retained?"
+
+    extractive = RAGOrchestrator(KnowledgeBase(load_corpus())).answer(query)
+
+    client = _FakeAnthropicClient(text="Purge at 30 days [1], enforced automatically [2].")
+    generative = RAGOrchestrator(
+        KnowledgeBase(load_corpus()),
+        synthesizer=_claude_synthesizer(client, monkeypatch)).answer(query)
+
+    assert generative.synthesizer.startswith("claude:")
+    # Same number, same wording, in both bodies.
+    assert extractive.confidence == generative.confidence
+    confidence_line = f"Confidence: {extractive.confidence:.2f}"
+    assert confidence_line in extractive.text
+    assert confidence_line in generative.text, "the generative answer hides its confidence"
+    # And the provenance of the prose is stated in the artifact itself.
+    assert "prose synthesised by" in generative.text
+    # Caveats carry across too, not just the score.
+    for note in extractive.notes:
+        assert note in generative.text, f"caveat lost on the generative path: {note!r}"
+
+
 def test_claude_prompt_supplies_every_marker_it_permits(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
