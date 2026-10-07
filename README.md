@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 65-case test suite in a few more.
+seconds, and the 66-case test suite in a few more.
 
 ### Demo
 
@@ -45,15 +45,29 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 65 tests, 2-10s
+python -m pytest tests/ -q                 # 66 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
 ```
 
-`--explain` prints the execution plan, the inter-agent message transcript, and
-the citation audit. It is the fastest way to see that the coordination is real
-rather than decorative.
+`--explain` prints the execution plan, the inter-agent message transcript, the
+citation audit and which synthesiser produced the answer. It is the fastest way
+to see that the coordination is real rather than decorative.
+
+To try the optional generative synthesis, nothing goes in the repo — the
+credential is read from the environment:
+
+```bash
+pip install anthropic                 # or: pip install -r requirements-optional.txt
+export ANTHROPIC_API_KEY=sk-ant-...   # ANTHROPIC_AUTH_TOKEN also works
+python -m rag_system --demo --claude --explain
+```
+
+`Synthesizer: claude:claude-opus-5` in the output means the generative path ran;
+`Synthesizer: extractive` means it fell back, and the reason is logged at WARNING
+on stderr. Falling back is deliberate — any API failure costs prose, never the
+answer — so without that line a silent fallback is invisible.
 
 **You do not need to run the notebook.** It is committed with executed outputs, so
 it renders in full on GitHub, charts included — and CI executes it end to end on
@@ -349,7 +363,7 @@ capability visibly changes behaviour:
 ├── data/synthetic/               # 49 documents, 3 domains + update fixture
 │   └── README.md                 # provenance, schema, planted conflicts
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 57 tests, 65 cases
+├── tests/test_scenarios.py       # 58 tests, 66 cases
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
@@ -389,13 +403,13 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q                      # 65 tests
+python -m pytest tests/ -q                      # 66 tests
 python -m pytest --doctest-modules rag_system/  # worked examples in docstrings
 python -m ruff check .                          # config in pyproject.toml
 python -m mypy
 ```
 
-Coverage is 85% of statements, weighted towards the failure modes rather than the
+Coverage is 87% of statements, weighted towards the failure modes rather than the
 happy path: the suite asserts that out-of-domain queries abstain, that a crashed
 agent degrades rather than aborts, that a *hung* agent is abandoned on a deadline
 instead of stalling the query, that degradation *lowers* reported confidence, that

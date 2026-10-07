@@ -88,6 +88,11 @@ def run(argv: Optional[List[str]] = None) -> int:
                   f"against source spans")
             for record in failed:
                 print(f"  FAILED {record['marker']} {record['doc_id']}: {record['reason']}")
+            # Which synthesiser actually ran. Worth printing because the
+            # generative path falls back to the extractive one on any failure,
+            # deliberately and silently -- so without this line there is no way
+            # to tell from the output whether --claude did anything.
+            print(f"Synthesizer: {answer.synthesizer}")
             print(f"Timings (ms): {json.dumps(answer.timings_ms)}")
 
     if args.stats:
