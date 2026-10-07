@@ -82,49 +82,38 @@ simpler, but agents that start simultaneously cannot learn anything from each
 other, which reduces "multi-agent" to several independent searches sharing an
 output format.
 
-```
-user Orchestrator Classifier Technical Blackboard Compliance Resolver
-+----+------------+----------+---------+----------+----------+---------
-Q --->            |          |         |          |          |
-|    1------------>          |         |          |          |
-|    |            (2)        |         |          |          |
-|    3--------------------------------->          |          |
-|    |            |          |         |          |          |
-== PHASE 1 (primary domain, sequential, unexpanded) == ================
-|    4----------------------->         |          |          |
-|    |            |          (5)       |          |          |
-|    |            |          6--------->          |          |
-|    <-----------------------7         |          |          |
-|    |            |          |         |          |          |
-== PHASE 2 (supporting domains, concurrent, context-expanded) == ======
-|    8-------------------------------------------->          |
-|    |            |          |         9---------->          |
-|    |            |          |         |          (10)       |
-|    <--------------------------------------------11         |
-|    |            |          |         |          |          |
-|    12------------------------------------------------------>
-|    <-------------------------------------------------------13
-|    (14)         |          |         |          |          |
-< ----
+```mermaid
+sequenceDiagram
+    autonumber
+    participant user
+    participant Orch as Orchestrator
+    participant Cls as Classifier
+    participant Tech as Technical
+    participant BB as Blackboard
+    participant Comp as Compliance
+    participant Res as Resolver
 
-  (N) = internal step, no message sent -- N--> / <--N is a message
-  Q query arrives
-  1 classify
-  2 domains={technical,compliance}; intent=procedural,
-   complexity=0.42; decompose into 2 scoped sub-queries
-  3 seed ctx
-  4 REQUEST
-  5 search own namespace; extract + score claims
-  6 PARTIAL: environment=production
-  7 RESULT
-  8 REQUEST
-  9 read ctx
-10 query += "production, change control"; search
-11 RESULT
-12 detect + resolve conflicts
-13 1 conflict: policy(2 reviewers) overrules runbook(1)
-14 synthesise -> cite -> score confidence -> record metrics
-  A answer returned to user
+    user->>Orch: query arrives
+    Orch->>Cls: classify
+    Note right of Cls: domains={technical,compliance}, intent=procedural,<br/>complexity=0.42 -- decompose into 2 scoped sub-queries
+    Orch->>BB: seed context
+
+    Note over Orch,Res: PHASE 1 -- primary domain, sequential, unexpanded
+    Orch->>Tech: REQUEST
+    Note right of Tech: search own namespace,<br/>extract + score claims
+    Tech->>BB: PARTIAL: environment=production
+    Tech-->>Orch: RESULT
+
+    Note over Orch,Res: PHASE 2 -- supporting domains, concurrent, context-expanded
+    Orch->>Comp: REQUEST
+    BB->>Comp: read context
+    Note right of Comp: query += "production, change control"<br/>then search
+    Comp-->>Orch: RESULT
+
+    Orch->>Res: detect + resolve conflicts
+    Res-->>Orch: 1 conflict -- policy (2 reviewers) overrules runbook (1 reviewer)
+    Note right of Orch: synthesise -> cite -> score confidence -> record metrics
+    Orch-->>user: answer returned
 ```
 
 **Why phase 1 runs unexpanded.** Expanding the primary query with context
