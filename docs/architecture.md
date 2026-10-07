@@ -309,6 +309,16 @@ because conflict resolution here is a governance decision with an auditable basi
 and should not be delegated to a sampled output. Any API failure falls back to
 the extractive path, so enabling it can degrade prose but never lose the answer.
 
+The citation numbering is shared between the two synthesisers, so a marker means
+the same thing whichever produced the text, and the source list is filtered to
+what the prose actually cites — the model is handed more findings than it chooses
+to use, and appending all of them would reintroduce the padding that minting
+citations after selection exists to prevent. Conflict participants are exempt and
+kept unconditionally: a model tends to name an overruled document in prose rather
+than cite its marker, and an overruled claim has to stay exactly as traceable as
+an adopted one. Numbering is never compacted to close the resulting gaps, because
+renumbering would silently repoint the model's own citations.
+
 **Selection is by topicality, not by confidence.** Claims carry two scores that
 answer different questions, and conflating them produced two real defects:
 

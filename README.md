@@ -24,7 +24,7 @@ detected and adjudicated, and a single cited answer is synthesised.
 **It runs fully offline.** No API key, no model download, no network access — the
 default embedding backend is TF-IDF projected through a truncated SVD, computed
 locally. The demo notebook executes end to end on a clean checkout in a few
-seconds, and the 66-case test suite in a few more.
+seconds, and the 68-case test suite in a few more.
 
 ### Demo
 
@@ -45,7 +45,7 @@ git clone https://github.com/kirilogk7/multi-agent-rag-orchestrator.git
 cd multi-agent-rag-orchestrator
 pip install -r requirements.txt
 
-python -m pytest tests/ -q                 # 66 tests, 2-10s
+python -m pytest tests/ -q                 # 68 tests, 2-10s
 python -m rag_system --demo                # the three assignment scenarios
 python -m rag_system "How long are logs containing personal data retained?" --explain
 jupyter lab notebooks/demo.ipynb           # the full walkthrough
@@ -369,7 +369,7 @@ capability visibly changes behaviour:
 ├── data/synthetic/               # 49 documents, 3 domains + update fixture
 │   └── README.md                 # provenance, schema, planted conflicts
 ├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 58 tests, 66 cases
+├── tests/test_scenarios.py       # 60 tests, 68 cases
 ├── docs/architecture.md
 ├── systems_design/
 │   └── self_service_paradox.md   # task 2
@@ -409,7 +409,7 @@ real to adjudicate rather than being demonstrated on a toy example:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q                      # 66 tests
+python -m pytest tests/ -q                      # 68 tests
 python -m pytest --doctest-modules rag_system/  # worked examples in docstrings
 python -m ruff check .                          # config in pyproject.toml
 python -m mypy

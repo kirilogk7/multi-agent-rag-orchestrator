@@ -1245,15 +1245,21 @@ class ClaudeSynthesizer(Synthesizer):
             if not text:
                 return baseline
 
-            # Sources and conflict detail are appended from our own records
-            # rather than trusting the model to reproduce them faithfully.
-            appendix = "\n\nSources\n" + "\n".join("  " + c.render() for c in baseline.citations)
+            # Sources are appended from our own records rather than trusting the
+            # model to reproduce them faithfully -- but only the ones the answer
+            # actually rests on. The extractive path mints citations after
+            # selection precisely so the source list cannot be padded with
+            # documents the reader never sees quoted; appending every supplied
+            # finding here would reintroduce that, because the model is given
+            # more findings than it chooses to cite.
+            cited = self._citations_in(text, baseline)
+            appendix = "\n\nSources\n" + "\n".join("  " + c.render() for c in cited)
             return Answer(
                 query=query,
                 text=text + appendix,
                 confidence=baseline.confidence,
                 domains=tuple(domains),
-                citations=baseline.citations,
+                citations=cited,
                 claims=baseline.claims,
                 conflicts=baseline.conflicts,
                 degraded=degraded,
@@ -1269,6 +1275,36 @@ class ClaudeSynthesizer(Synthesizer):
             LOGGER.warning("Claude synthesis failed (%s: %s); using %s",
                            type(exc).__name__, exc, self.fallback.name)
             return baseline
+
+    @staticmethod
+    def _citations_in(text: str, baseline: Answer) -> Tuple[Citation, ...]:
+        """The citations the generated prose actually rests on.
+
+        Keeps a citation when its marker appears in the text, and keeps every
+        conflict participant unconditionally. The second rule is not an
+        exception for tidiness: an overruled claim has to stay traceable even
+        when the model names its document in prose rather than citing the
+        marker, which is what it tends to do. Dropping it would undo the
+        guarantee that adopted and overruled guidance are equally auditable.
+
+        Original numbering is preserved rather than compacted, so a marker in
+        the prose always points at the same source. That can leave gaps, which
+        is the honest outcome -- renumbering would silently repoint the model's
+        own citations at different documents.
+        """
+        protected = {
+            (claim.doc_id, claim.char_start, claim.char_end)
+            for conflict in baseline.conflicts
+            for claim in (conflict.winner, conflict.loser)
+        }
+        kept = tuple(
+            c for c in baseline.citations
+            if c.marker in text
+            or (c.doc_id, c.char_start, c.char_end) in protected
+        )
+        # Defensive: a model that cited nothing at all leaves the reader with no
+        # source list, which is worse than an over-full one.
+        return kept or baseline.citations
 
     @staticmethod
     def _build_prompt(query: str, baseline: Answer) -> str:

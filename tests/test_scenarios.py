@@ -22,7 +22,12 @@ from rag_system.domain_agents import DomainAgent
 from rag_system.orchestrator import RAGOrchestrator
 from rag_system.protocol import MessageType
 from rag_system.query_classifier import QueryIntent
-from rag_system.synthesis import ClaimExtractor, ClaudeSynthesizer, ConflictResolver
+from rag_system.synthesis import (
+    Answer,
+    ClaimExtractor,
+    ClaudeSynthesizer,
+    ConflictResolver,
+)
 from rag_system.utils import Document, load_corpus
 from rag_system.vector_store import KnowledgeBase, RetrievalParams
 
@@ -487,6 +492,18 @@ def test_every_citation_verifies_against_its_source(
     assert not failures, f"unverifiable citations: {failures}"
 
 
+def _body(answer: Answer) -> str:
+    """The answer without its own Sources block.
+
+    Checking markers against the whole of ``answer.text`` is useless: the Sources
+    block is rendered *from* the citations, so every marker appears there by
+    construction and a "marker not in text" assertion can never fail. Simulating
+    the original defect -- 12 citations for 7 displayed findings -- confirmed it
+    flagged nothing. The body is where a marker has to earn its place.
+    """
+    return answer.text.rsplit("\nSources\n", 1)[0]
+
+
 def test_every_citation_is_referenced_in_the_answer(
     orchestrator: RAGOrchestrator
 ) -> None:
@@ -498,7 +515,7 @@ def test_every_citation_is_referenced_in_the_answer(
     """
     for query, _expected in ASSIGNMENT_SCENARIOS:
         answer = orchestrator.answer(query)
-        orphans = [c.marker for c in answer.citations if c.marker not in answer.text]
+        orphans = [c.marker for c in answer.citations if c.marker not in _body(answer)]
         assert not orphans, f"unreferenced citations {orphans} for {query!r}"
 
 
@@ -840,6 +857,77 @@ def test_claude_synthesis_falls_back_on_a_refusal(
     assert answer.synthesizer == "extractive"
     assert answer.citations
     assert not answer.abstained
+
+
+def test_claude_source_list_drops_markers_the_prose_never_cites(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The generative path must honour the same no-padding rule as the extractive one.
+
+    Observed against the real API: asked about log retention, Claude cited [1]-[7]
+    and the appended source list ran to [9], leaving an entry the reader never
+    sees quoted -- exactly the defect `test_every_citation_is_referenced_in_the_answer`
+    forbids on the extractive path. The model is handed more findings than it
+    chooses to use, so the list has to be filtered by what the prose cites.
+    """
+    class _PartialCiter(_FakeAnthropicClient):
+        """Cites only [1] and [2], as a real model citing a subset would."""
+
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            super().create(**kwargs)
+            block = SimpleNamespace(
+                type="text",
+                text="Logs with personal data go at 30 days [1], enforced automatically [2].")
+            return SimpleNamespace(content=[block], stop_reason="end_turn")
+
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(_PartialCiter(), monkeypatch))
+    answer = orchestrator.answer("How long are logs containing personal data retained?")
+
+    assert answer.synthesizer.startswith("claude:")
+    # Conflict participants are exempt -- an overruled claim stays traceable even
+    # when the model names its document in prose instead of citing the marker.
+    conflict_spans = {
+        (claim.doc_id, claim.char_start, claim.char_end)
+        for conflict in answer.conflicts
+        for claim in (conflict.winner, conflict.loser)
+    }
+    body = _body(answer)
+    unexplained = [
+        c.marker for c in answer.citations
+        if c.marker not in body
+        and (c.doc_id, c.char_start, c.char_end) not in conflict_spans
+    ]
+    assert not unexplained, f"source list padded with {unexplained}"
+    assert {"[1]", "[2]"} <= {c.marker for c in answer.citations}
+
+
+def test_claude_keeps_the_overruled_claim_traceable(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pruning must not drop a conflict loser the model named in prose only."""
+    class _NamesConflictInProse(_FakeAnthropicClient):
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            super().create(**kwargs)
+            block = SimpleNamespace(
+                type="text",
+                text=("Purge within 30 days [1]. The observability runbook's 90-day "
+                      "figure is overruled."))
+            return SimpleNamespace(content=[block], stop_reason="end_turn")
+
+    kb = KnowledgeBase(load_corpus())
+    orchestrator = RAGOrchestrator(
+        kb, synthesizer=_claude_synthesizer(_NamesConflictInProse(), monkeypatch))
+    answer = orchestrator.answer("How long are logs containing personal data retained?")
+
+    assert answer.conflicts, "this query is expected to surface the planted conflict"
+    spans = {(c.doc_id, c.char_start, c.char_end) for c in answer.citations}
+    for conflict in answer.conflicts:
+        for claim in (conflict.winner, conflict.loser):
+            assert (claim.doc_id, claim.char_start, claim.char_end) in spans, (
+                f"{claim.document.citation_label} lost its citation; an overruled "
+                f"claim must stay as traceable as an adopted one")
 
 
 def test_claude_prompt_supplies_every_marker_it_permits(
