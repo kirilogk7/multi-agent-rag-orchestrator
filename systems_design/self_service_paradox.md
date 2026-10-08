@@ -111,6 +111,17 @@ and see typed ports, an owner, and a test badge -- without reading
 any code.
 ```
 
+**Two rungs need naming, because they are where the ladder could leak.** Rung 4
+is a sandboxed expression language — pure and total, no I/O and no loops,
+evaluated by the platform — which is what lets a business user write
+`amount > 10000` without it becoming code somebody has to review. Rung 6 is
+GitOps, and it raises the obvious question: if a workflow is also a file in a
+repo, which copy is authoritative? The platform's store, always. A repo is a
+mirror with a merge gate — a commit opens a patch against the IR, the patch
+validator accepts or rejects it exactly as it would a canvas drag, and the
+store pushes the result back. A workflow edited in both places does not fork,
+because the repo was never a second source of truth.
+
 **Power users supply business users — that's the actual relationship.**
 "Making it simpler" and "making it more powerful" sound like they trade off
 because the brief treats the two audiences as adversaries. They're not —
@@ -139,12 +150,19 @@ Each loop: the catalog gains a capability, the next business user
 needs no help, and the power user's work is reused, not repeated.
 ```
 
-**Onboarding follows the same ladder.** Everyone starts at rung 1 — a
-template for the workflow they actually want ("approve an invoice," not "a
-blank canvas"). Wizards cover the common parameterized cases. The canvas is
-for free composition once someone outgrows templates. Code is never the
-entry point; it's where one *node* ends up after a business user asks for
-something the catalog doesn't have yet.
+**Onboarding follows the same ladder, from whichever end you arrive at.** A
+business user starts at rung 1 — a template for the workflow they actually
+want ("approve an invoice," not "a blank canvas"). Wizards cover the common
+parameterized cases. The canvas is for free composition once someone outgrows
+templates. Code is never *their* entry point; it's where one *node* ends up
+after they ask for something the catalog doesn't have yet.
+
+A power user arrives at the other end, and onboarding them means an API
+reference and the document schema rather than a template gallery:
+`GET /workflows/{id}` returns the same document the canvas is editing, so
+their first script lands them inside the shared document instead of beside
+it. Neither audience is asked to start where the other does — but both
+start on the same file, which is the only part that matters.
 
 **Interface design: one screen, three panels, always visible together.**
 The rung a node is on is never hidden behind a mode switch — a business
@@ -174,10 +192,11 @@ user sees the escalated node sitting in their canvas, not a separate
 Catalog on the left (templates and published blocks, searchable); canvas in
 the middle (the workflow itself); inspector on the right, which is where
 escalation actually happens — selecting a node shows its rung, its declared
-effects, and a one-click path to the next rung up or down. A business user
-never has to know "rung 5" is code to work around a node that's on it; they
-see effects, an owner, and a test badge, which is all the inspector promises
-at any rung.
+effects, and a one-click path to the next rung up. Descent is not symmetric —
+code does not turn back into boxes — so what descends is legibility rather
+than form: a business user never has to know "rung 5" is code to work around a
+node that's on it, because they see effects, an owner, and a test badge, which
+is all the inspector promises at any rung.
 
 ## 3. Technical implementation
 
@@ -395,12 +414,16 @@ delete. A stale block in the catalog costs a bad search result; a deleted
 one costs a broken payment run.
 
 **The one metric that tells you if this actually worked: the descent
-rate** — the share of power-user-authored blocks that business users go on
-to edit from the canvas. Adoption numbers and satisfaction scores can both
-look healthy while the two populations quietly diverge into two platforms
-that happen to share a login page. The descent rate can't fake that. If it's
-zero, the one-way door exists in practice no matter what the architecture
-diagram claims.
+rate** — the share of power-user-authored blocks that business users go on to
+rewire from the canvas: new inputs, a new position in a workflow, new
+downstream consumers, without asking the block's author to change anything.
+That is what "editing" a code block means to someone who cannot read it, and
+it is the thing that stops being possible the moment the door closes.
+
+Adoption numbers and satisfaction scores can both look healthy while the two
+populations quietly diverge into two platforms that happen to share a login
+page. The descent rate can't fake that. If it's zero, the one-way door exists
+in practice no matter what the architecture diagram claims.
 
 ## What this doesn't solve
 
