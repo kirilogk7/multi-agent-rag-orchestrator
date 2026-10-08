@@ -191,10 +191,10 @@ Everything below follows from how these six talk to each other — never by
 reaching into one another's internals, only through the IR and the patches
 in front of it.
 
-**The IR is a keyed document, not a list.** Nodes and edges are maps keyed
-by stable id, not arrays — so two people adding a node each append at a
-different key instead of the same list position, which is what makes
-concurrent edits mergeable instead of conflicting:
+**The first data model: the IR is a keyed document, not a list.** Nodes and
+edges are maps keyed by stable id, not arrays — so two people adding a node
+each append at a different key instead of the same list position, which is
+what makes concurrent edits mergeable instead of conflicting:
 
 ```yaml
 schema: workflow/v1
@@ -244,7 +244,7 @@ block. This matters more for adoption than for architecture: a catalog
 that starts empty gets used by nobody, and "publish as block" only
 becomes a flywheel once there is something there to compose against.
 
-A block definition is the second document type, and the only other one a
+A block definition is the second data model, and the only other one a
 user ever authors:
 
 ```yaml
