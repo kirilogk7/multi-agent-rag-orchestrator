@@ -168,6 +168,23 @@ print(orchestrator.explain(answer.trace_id))
                                          - timings
 ```
 
+The message bus feeds three domain agents, each owning its own namespaced index:
+
+```
+                         MessageBus + Blackboard
+                                    |
+                +-------------------+-------------------+
+                v                   v                   v
+            Technical           Business           Compliance
+              agent               agent               agent
+                |                   |                   |
+           VectorStore         VectorStore         VectorStore
+          dense + BM25        dense + BM25        dense + BM25
+
+          +------------------ KnowledgeBase -----------------+
+                 (versioned, incrementally ingestable)
+```
+
 **Execution is two-phase, not a flat fan-out.** Phase 1 runs the primary domain
 alone, searching the user's own words, and publishes what it finds to a shared
 blackboard. Phase 2 fans out the supporting domains concurrently, each reading
@@ -180,8 +197,8 @@ as a result. Agents that start simultaneously have nothing to learn from each
 other, which reduces "multi-agent" to several independent searches sharing an
 output format.
 
-Per-agent diagrams, the sequence diagram, the data model and the full trade-off
-table: **[`docs/architecture.md`](docs/architecture.md)**.
+The request sequence diagram, the data model and the full trade-off table:
+**[`docs/architecture.md`](docs/architecture.md)**.
 
 ---
 
@@ -293,7 +310,7 @@ reasoned about beats one that cannot be debugged.
 
 ### Things that were measured and changed
 
-Three behaviours in the code exist because the obvious version was tried and was
+Four behaviours in the code exist because the obvious version was tried and was
 worse. They are documented at their implementation sites and in the notebook:
 
 - **Noisy-OR instead of a weighted sum** when fusing the cue lexicon with the
