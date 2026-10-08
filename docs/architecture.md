@@ -522,6 +522,26 @@ extraction handles the unit families present in this corpus, not arbitrary ones.
 Routing thresholds were tuned against a handful of queries, not a held-out set —
 with real traffic they should be fitted and monitored for drift.
 
+*The generative path needs three controls it does not have.* They are separate
+gates and are often conflated into one. A **data-classification** pass decides
+what may leave the perimeter at all; a **synthesis** pass decides how to phrase
+what is allowed to leave. Only the second exists here. There is also no
+prompt-injection defense beyond instruction: the system prompt tells the model to
+use only the supplied findings, but a corpus document is retrieved and templated
+directly into that prompt, so an adversarially-authored or compromised document is
+an injection vector the pipeline neither detects nor sandboxes. And no audit log
+records what was sent to the API, when, or on whose behalf -- the first artefact a
+vendor-risk review asks for once an external model is in the loop at all.
+
+*`Synthesizer` is provider-pluggable in principle, Anthropic-only in practice.*
+The interface is real -- both synthesisers implement it with nothing in the
+orchestrator changing -- but there is exactly one concrete LLM implementation. An
+Azure OpenAI backend would need its own client setup and response parsing; the two
+constraints already enforced on the Claude path, no conflict re-adjudication and
+deterministic fallback on any failure, would carry over unchanged, because they
+live in the orchestrator's contract with `Synthesizer` rather than in anything
+Claude-specific.
+
 **Not implemented.** Caching of repeated queries, authentication and per-user
 document-level access control, multi-turn conversational context, a held-out
 evaluation harness with regression gates, and streaming partial answers.

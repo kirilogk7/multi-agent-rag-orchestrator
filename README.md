@@ -152,46 +152,20 @@ print(orchestrator.explain(answer.trace_id))
                                          - timings
 ```
 
-The message bus above feeds three domain agents, each with its own namespaced
-retriever:
-
-```
-                        +--------------------+
-                        |     MessageBus     |
-                        |(from diagram above)|
-                        +--------------------+
-                |------------------|------------------|
-                v                  v                  v
-        +---------------+  +--------------+  +----------------+
-        |Technical Agent|  |Business Agent|  |Compliance Agent|
-        +---------------+  +--------------+  +----------------+
-                |                  |                  |
-                |                  |                  |
-                v                  v                  v
-        +-----------+      +-----------+     +-----------+
-        |VectorStore|      |VectorStore|     |VectorStore|
-        | technical |      | business  |     |compliance |
-        |dense+BM25 |      |dense+BM25 |     |dense+BM25 |
-        +-----------+      +-----------+     +-----------+
-
-        +-----------------KnowledgeBase------------------+
-                 (versioned, incrementally ingestable)
-```
-
 **Execution is two-phase, not a flat fan-out.** Phase 1 runs the primary domain
-alone, searching the user's own words; it publishes what it discovers to a shared
+alone, searching the user's own words, and publishes what it finds to a shared
 blackboard. Phase 2 fans out the supporting domains concurrently, each reading
 phase-1 context and specialising its own retrieval before searching.
 
-The cost is one extra round trip. The benefit is that agents actually inform each
-other: on the deployment question, phase 1 establishes that the deployment targets
-production, and the compliance agent's relevance on the governing change-control
-policy rises 23% as a result. A flat fan-out cannot do this, because agents that
-start simultaneously have nothing to learn from each other — which reduces
-"multi-agent" to several independent searches sharing an output format.
+The cost is one extra round trip. The benefit is measurable: on the deployment
+question, phase 1 establishes that the deployment targets production, and the
+compliance agent's relevance on the governing change-control policy rises 23%
+as a result. Agents that start simultaneously have nothing to learn from each
+other, which reduces "multi-agent" to several independent searches sharing an
+output format.
 
-Full design rationale, sequence diagrams and trade-off tables:
-**[`docs/architecture.md`](docs/architecture.md)**.
+Per-agent diagrams, the sequence diagram, the data model and the full trade-off
+table: **[`docs/architecture.md`](docs/architecture.md)**.
 
 ---
 
@@ -358,42 +332,7 @@ capability visibly changes behaviour:
 
 ---
 
-## Repository structure
-
-```
-├── README.md
-├── requirements.txt              # numpy + dev tooling; that is all
-├── requirements-optional.txt     # sentence-transformers, anthropic
-├── pyproject.toml
-├── rag_system/
-│   ├── __init__.py
-│   ├── orchestrator.py           # planning, two-phase execution, feedback
-│   ├── query_classifier.py       # routing, intent, complexity, decomposition
-│   ├── domain_agents.py          # per-domain agents, context sharing
-│   ├── vector_store.py           # embedding backends, BM25, hybrid retrieval
-│   ├── utils.py                  # data models, text processing, scoring
-│   ├── protocol.py               # (+) message bus and blackboard
-│   ├── synthesis.py              # (+) claims, conflicts, citations
-│   ├── monitoring.py             # (+) metrics registry
-│   └── __main__.py               # (+) CLI entry point
-├── data/synthetic/               # 49 documents, 3 domains + update fixture
-│   └── README.md                 # provenance, schema, planted conflicts
-├── notebooks/demo.ipynb
-├── tests/test_scenarios.py       # 66 tests, 74 cases
-├── docs/architecture.md
-├── systems_design/
-│   └── self_service_paradox.md   # task 2
-└── .github/workflows/ci.yml      # tests, lint, CLI and notebook on 3.10–3.12
-```
-
-Files marked **(+)** are additions to the structure given in the assignment. The
-five mandated modules all exist and do their named jobs; the four additions
-isolate concerns that would otherwise have turned `utils.py` into a dumping
-ground and `orchestrator.py` into a 1,200-line file. `synthesis.py` in particular
-owns two of the four "advanced features" — conflict resolution and citation
-tracking — which is enough responsibility to deserve its own module.
-
-### The synthetic corpus
+## The synthetic corpus
 
 49 documents — 17 technical, 16 business, 16 compliance — written from scratch for
 this exercise. No real company data, and no company names at all. Provenance, the
@@ -447,69 +386,24 @@ merely fails a lint rule, fails the build.
 
 ## Limitations
 
-Stated plainly, with what production would change set out in
-[`docs/architecture.md` §5](docs/architecture.md):
+The full set, with what production would change, is in
+[`docs/architecture.md` §5](docs/architecture.md). The ones that would shape a
+reviewer's judgement:
 
 - **In-memory brute-force index.** Free at 101 passages; beyond ~10⁵ it needs an
   ANN index with metadata filtering.
-- **Regex sentence splitting** will merge sentences in messier prose than this
-  corpus.
-- **Hand-authored cue lexicons** need maintenance as domains evolve. A real system
-  would learn per-cue weights from logged feedback.
-- **Thresholds tuned against a handful of queries**, not a held-out set. With real
-  traffic they should be fitted and monitored for drift.
+- **Thresholds were tuned against a handful of queries, not a held-out set.** With
+  real traffic they should be fitted and monitored for drift.
 - **Weak permission phrasing can misroute.** "Can I enable verbose request tracing
-  in production to debug latency?" routes to technical alone — three strong
-  technical cues outweigh the single weak `can i` signal, and the selection
-  threshold is relative to the leading domain's score, so a strong primary raises
-  the bar for secondary domains. The user is then told how to do it and never told
-  policy forbids it. Explicit phrasing ("Am I allowed to…", "Is X permitted?")
-  routes correctly and is pinned by a test. Deliberately left unfixed: the
-  candidate fixes were raising the cue weight (over-routes genuine technical
-  questions) or capping the relative threshold, which on measurement fixed this one
-  query at exactly one value and improved nothing on an independent harder set.
-  Learning per-cue weights from logged feedback is the real fix.
-- **The supersession detector is inert on the default path.** It is implemented and
-  tested, but superseded documents are excluded from retrieval so that answers
-  quote current policy — which means nothing feeds the detector in normal use. It
-  fires with `include_superseded=True` or through the live knowledge-update flow.
-  Surfacing "you may be thinking of the old rule" in ordinary answers needs a
-  second narrow retrieval pass for conflict detection only; that is not
-  implemented.
-- **Confidence is a function of today's date.** Recency decay reads
-  `date.today()` with a 540-day half-life, so the same question asked against
-  the same corpus months apart returns slightly different confidence, and the
-  notebook's committed outputs drift from a fresh run in the third decimal
-  place. Deliberate — a document really does get staler — but it means
-  "deterministic" has a date qualifier. Pinning an evaluation date would mean
-  threading `now` through the orchestrator; `ClaimExtractor.extract` and
-  `ConflictResolver.detect` already accept it.
-- **Conflict detection is O(n²) in claims** — fine here, needs blocking by subject
-  at corpus scale.
-- **Numeric extraction** covers the unit families in this corpus, not arbitrary ones.
-- **`ClaudeSynthesizer` has no data-classification gate before egress.** When
-  enabled, the full text of every retrieved finding — including compliance and
-  technical passages — is sent to a third-party API with no filtering or
-  redaction step. In a regulated environment this needs a classification pass
-  (what may leave the perimeter at all) before a synthesis pass (how to phrase
-  what's allowed to leave), and those are two different gates, not one.
-- **No prompt-injection defense beyond instruction.** The system prompt tells
-  the model to use only the supplied findings, but that is an instruction, not
-  a control — a document in the corpus is retrieved and templated directly
-  into the prompt, so an adversarially-authored or compromised document is an
-  injection vector the pipeline does not currently detect or sandbox against.
-- **No audit log of third-party calls.** What was sent to the API, when, and by
-  whom is not currently recorded anywhere, which is the first thing a vendor-risk
-  review would ask for once an external model is in the loop at all.
-- **`Synthesizer` is provider-pluggable in principle, Anthropic-only in
-  practice.** The interface is real (`ExtractiveSynthesizer` and
-  `ClaudeSynthesizer` both implement it with nothing else in the orchestrator
-  changing), but there is exactly one concrete LLM implementation. An Azure
-  OpenAI backend behind the same interface would need its own client setup and
-  response parsing, but the same two constraints already enforced on the
-  Claude path — no conflict re-adjudication, deterministic fallback on any
-  failure — would carry over unchanged, because those constraints live in the
-  orchestrator's contract with `Synthesizer`, not in anything Claude-specific.
+  in production?" routes to technical alone, so the user is told how and never told
+  policy forbids it. Left unfixed deliberately: both candidate fixes were measured
+  and both were magic numbers rather than improvements.
+- **The generative path is not production-ready, and that is not a tuning gap.**
+  With `--claude` enabled, every retrieved finding is sent to a third-party API
+  with no data-classification gate before egress, no prompt-injection defense
+  beyond an instruction in the system prompt, and no audit log of what left the
+  perimeter. Three separate controls, none of them present. The default path
+  requires none of them, which is why it is the default.
 - **Not implemented:** query caching, authentication and document-level access
   control, multi-turn conversational context, a held-out evaluation harness with
   regression gates, streaming partial answers.
