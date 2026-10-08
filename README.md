@@ -30,11 +30,35 @@ seconds, and the 74-case test suite in a few more.
 
 ![33-second annotated walkthrough: a fresh clone, one --explain call, and a guided tour of the routing scores, decomposition, synthesized answer, resolved conflict, citations, agent transcript and citation audit](docs/media/demo.gif)
 
-33-second walkthrough of one `--explain` call against a fresh clone: multi-label
-routing with confidence scores, query decomposition, the synthesized answer,
-the detected contradiction and how it was resolved, citations, the inter-agent
-message transcript, and the citation audit — all produced by a single real
-invocation, annotated after the fact for clarity.
+A single `--explain` call against a fresh clone, annotated after the fact. The
+animation reads best at full size; what it steps through is below, lightly
+wrapped from the same command's output:
+
+```text
+routing    : compliance, technical (confidence 0.83)
+
+Conflicting guidance (1 resolved)
+  ! log (duration): 30 days vs 90 days
+    adopted   [1] COMP-DATA-004 v2.4 (compliance, policy, 2025-12-01)
+              "Logs containing personal data must be purged within 30 days
+               unless a legal hold applies."
+    overruled [9] TECH-OBS-003 v1.9 (technical, runbook, 2025-05-30)
+              "Application logs are retained for 90 days in the hot tier
+               where they are fully indexed and searchable."
+    basis     policy outranks runbook; compliance governs over technical;
+              newer (2025-12-01 > 2025-05-30); margin 0.257
+
+Confidence: 0.75 (high) -- 8 finding(s) from 4 document(s);
+            1/1 conflict(s) resolved decisively.
+  note: the technical agent refined its search using context from another
+        agent: personal data, lawful basis, retention
+
+Citation audit: 9/9 verified against source spans
+```
+
+Two documents disagree, the policy wins over the runbook with the basis stated,
+one agent's findings changed another's search, and every citation was re-read
+against its source span.
 
 ---
 
