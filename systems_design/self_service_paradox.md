@@ -5,17 +5,22 @@ users without becoming two platforms.*
 
 ## The core idea
 
-The brief frames this as a dial between simplicity and power. It isn't one.
-Business users and power users aren't asking for different *amounts* of the
-same thing — they're describing the same workflows at different levels of
-detail. So the real question isn't "how simple vs. how powerful" — it's
-**"can several notations sit over one shared document?"** If yes, there's one
-platform. If no, there are two platforms wearing one logo, which is what most
-low-code tools actually ship: the escape hatch to code is almost always
-one-way, so the moment someone uses it, the workflow leaves the business
-user's reach for good.
+Most low-code platforms ship an escape hatch to code, and it is almost always
+one-way: the moment anyone uses it, that workflow leaves the business user's
+reach for good. That is what two platforms wearing one logo looks like in
+production, and it is the specific failure this design exists to avoid.
 
-The design here keeps that door open in both directions:
+It happens because the premise is wrong. The brief frames this as a dial
+between simplicity and power; it isn't one. Business users and power users
+aren't asking for different *amounts* of the same thing — they're describing
+the same workflow at different levels of detail. "Approve the invoice" and the
+typed call that performs it are one step at two zoom levels, not two products.
+
+So the real question isn't "how simple vs. how powerful" — it's **"can several
+notations sit over one shared document?"** If yes, there's one platform. If no,
+there are two.
+
+The design here keeps that escape hatch open in both directions:
 
 ```
   canvas       code editor      wizard        API / SDK
