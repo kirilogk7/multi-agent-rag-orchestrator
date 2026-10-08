@@ -71,19 +71,17 @@ synthesis is opt-in, because a deterministic answer is the right default. With a
 key set but the flag omitted, `--explain` says so rather than leaving you to
 wonder whether the key was at fault.
 
-`Synthesizer: claude:claude-opus-5` in the output means the generative path ran;
-`Synthesizer: extractive` means it fell back, and the reason is logged at WARNING
-on stderr, unwrapped to its root cause. Falling back is deliberate — any API
-failure costs prose, never the answer — so without that line a silent fallback is
-invisible. The default model is `claude-opus-5`; to use another, construct
+`Synthesizer: claude:claude-opus-5` means the generative path ran;
+`Synthesizer: extractive` means it fell back, with the reason logged at WARNING
+on stderr, unwrapped to its root cause. Falling back is deliberate — an API
+failure costs prose, never the answer. For another model, construct
 `ClaudeSynthesizer(model=...)` directly.
 
-One environment trap worth naming, because it reports as a network fault and is
-not one: if the warning ends in `TypeError: process() takes no keyword arguments`,
-upgrade Brotli (`pip install -U "Brotli>=1.2.0"`). The SDK's vendored HTTP client
-passes a keyword argument that builds before 1.2.0 reject, so a response that
-arrived intact fails while being decoded. The tell is latency — three full
-round-trips before the SDK gives up, rather than a fast connect timeout.
+One trap, because it reports as a network fault and is not one: if the warning
+ends in `TypeError: process() takes no keyword arguments`, run
+`pip install -U "Brotli>=1.2.0"`. The SDK's vendored HTTP client passes a keyword
+that older Brotli builds reject, so a response that arrived intact fails while
+being decoded.
 
 **You do not need to run the notebook.** It is committed with executed outputs, so
 it renders in full on GitHub, charts included — and CI executes it end to end on
@@ -95,13 +93,7 @@ To execute it anyway without a browser:
 jupyter nbconvert --to notebook --execute notebooks/demo.ipynb --output /tmp/check.ipynb
 ```
 
-If you are in a Docker container or on a remote host, `jupyter lab` needs two extra
-flags (it refuses to start as root, and binds to localhost by default):
-
-```bash
-jupyter lab notebooks/demo.ipynb --allow-root --ip=0.0.0.0 --no-browser
-# then from your own machine:  ssh -L 8888:localhost:8888 <user>@<host>
-```
+Or use it as a library:
 
 ```python
 from rag_system import build_default_orchestrator
@@ -412,66 +404,19 @@ reviewer's judgement:
 
 ## Task 2 — Systems design: The Self-Service Paradox
 
-[`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md)
-— a design for one automation platform serving business users and power users
-without becoming two platforms.
+**[`systems_design/self_service_paradox.md`](systems_design/self_service_paradox.md)**
 
-**The argument in short.** The brief frames this as simplicity versus power, as
-if there were one dial the two audiences wanted in different positions. If that
-were true, two platforms would be the honest answer. It isn't true: both
-audiences are describing the same workflows at different levels of detail, so
-the real question is whether several notations can sit over one shared
-document.
+The brief frames this as simplicity versus power, as if one dial were wanted in
+two positions. It isn't one: both audiences describe the same workflows at
+different levels of detail, so the real question is whether several notations can
+sit over one shared document. They can — one canonical IR, with canvas, code
+editor, wizard and REST API as projections over it, and escalation happening per
+*node* rather than per user, so one step of a workflow can drop to code while the
+rest stays exactly as simple as it was.
 
-**Four moves carry the design**, one per required section:
-
-1. **Architecture** — one canonical IR; canvas, code editor, wizard, and a
-   plain REST API are projections over it, not four products — the API is
-   how power users get direct programmatic access without a parallel system.
-   Control flow is always declarative (so always drawable); custom logic
-   lives inside typed blocks, which stay *representable* on the canvas even
-   where they aren't *expandable*.
-2. **UX strategy** — escalation happens per node, not per user or per
-   workflow: one step of a workflow can move to code while the rest stays
-   exactly as simple as it was. "Publish as block" turns one power user's code
-   into every business user's drag-and-drop node — the two audiences are a
-   supply chain, not a conflict. One screen holds catalog, canvas, and an
-   inspector together, so escalating a node never means leaving to a
-   different view.
-3. **Technical implementation** — six components (IR store, per-surface
-   renderers, patch validator, block registry, scheduler, run log), each
-   talking to the others only through the IR. Nodes and edges are keyed maps
-   (a merge property, not a style choice), surfaces write typed patches
-   instead of whole-document saves (so a canvas drag structurally cannot
-   overwrite a code comment), and blocks are the single extension mechanism,
-   used the same way by engineers and the platform team alike. Two document
-   schemas are shown, the workflow IR and `block/v1`; most blocks wrap
-   microservices that already exist, so the catalog starts full rather than
-   empty. The section closes on scale and failure: the edit path and the run
-   path scale separately, every execution is deduped on
-   `(run_id, node_id, attempt)` so a retry can't pay an invoice twice, and
-   there is no automatic rollback because money that has moved can't be
-   un-moved.
-4. **Long-term maintainability** — review is keyed on a workflow's declared
-   effects and blast radius, never on whether it was built by dragging or by
-   coding; a workflow runs as its own principal, so blocks never hold
-   credentials and an over-scoped block fails in the patch validator at edit
-   time rather than at 3am; schema changes are additive-only, forever; block
-   lifecycle belongs to the platform rather than the author (a security fix
-   moves the pin unasked, an orphaned block keeps running but stops being
-   discoverable); and a four-tier certification ladder
-   (`uncertified -> community -> verified -> core`) governs who else can
-   *find* a published block without ever gating who can build one.
-
-It closes with a short, honest **"What this doesn't solve"** section (encapsulated
-code staying unreadable by design, no CRDT-level co-editing of a single node,
-no story for merging two *already-separate* platforms) rather than a long risk
-register — four real gaps, not a hedge.
-
-The success metric proposed is the **descent rate** — business users continuing
-to edit, on the canvas, workflows that contain power users' code. If that's
-zero, the one-way door exists in practice whatever the architecture diagram
-claims.
+The success metric proposed is the **descent rate**: the share of power-user
+blocks that business users go on to edit from the canvas. If it is zero, the
+one-way door exists in practice whatever the architecture diagram claims.
 
 ---
 
